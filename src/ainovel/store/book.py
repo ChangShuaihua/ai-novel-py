@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from ainovel.store.checkpoints import CheckpointStore
-from ainovel.store.io import IO
+from ainovel.store.io import IO, mark_readonly, mark_writable
 from ainovel.store.records import (
     BookInfoStore,
     PendingCommitStore,
@@ -30,6 +30,9 @@ class Book:
         if error is not None:
             raise error
         if writable:
+            mark_writable(book.root)
             refuse_unknown_advance_mode(book.run_meta.load())
+        else:
+            mark_readonly(book.root)
         book.writable = writable
         return book

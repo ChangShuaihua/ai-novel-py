@@ -8,12 +8,31 @@ from pathlib import Path
 from typing import Any
 
 
+class ReadOnlyError(PermissionError):
+    """这本书是只读打开的。诊断和导出不能写回。"""
+
+
+_READONLY_ROOTS: set[str] = set()
+
+
+def mark_readonly(root: Path) -> None:
+    _READONLY_ROOTS.add(str(Path(root).resolve()))
+
+
+def mark_writable(root: Path) -> None:
+    _READONLY_ROOTS.discard(str(Path(root).resolve()))
+
+
 class IO:
     """一本书目录上的读写锁。子存储可以各持一份，锁不跨目录。"""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self._lock = threading.RLock()
+
+    def _refuse_when_readonly(self) -> None:
+        if str(self.root.resolve()) in _READONLY_ROOTS:
+            raise ReadOnlyError(f"只读打开，拒绝写入 {self.root}")
 
     def exclusive(self) -> threading.RLock:
         return self._lock
@@ -41,6 +60,7 @@ class IO:
             self.write_bytes_unlocked(relative, data)
 
     def write_bytes_unlocked(self, relative: str, data: bytes) -> None:
+        self._refuse_when_readonly()
         atomic_replace(self.path(relative), data)
 
     def write_json(self, relative: str, payload: Any) -> None:
@@ -60,6 +80,7 @@ class IO:
             self.append_line_unlocked(relative, line)
 
     def append_line_unlocked(self, relative: str, line: bytes) -> None:
+        self._refuse_when_readonly()
         target = self.path(relative)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("ab") as handle:
@@ -72,6 +93,7 @@ class IO:
             self.remove_unlocked(relative)
 
     def remove_unlocked(self, relative: str) -> None:
+        self._refuse_when_readonly()
         try:
             self.path(relative).unlink()
         except FileNotFoundError:

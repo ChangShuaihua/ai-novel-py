@@ -36,6 +36,7 @@ class Engine:
         self.prompts = prompts
         self.decisions = DecisionStore(book.root)
         self.events: list[str] = []
+        self.listeners: list = []
         self.paused = False
         self.pause_reason = ""
         self.cancelled = False
@@ -51,6 +52,14 @@ class Engine:
 
     def abort(self) -> None:
         self.cancelled = True
+
+    def subscribe(self, listener) -> None:
+        self.listeners.append(listener)
+
+    def emit(self, text: str) -> None:
+        self.events.append(text)
+        for listener in list(self.listeners):
+            listener(text)
 
     def run(self, *, max_rounds: int | None = None) -> RunResult:
         rounds = 0
@@ -111,7 +120,7 @@ class Engine:
     def _precheck(self, instruction: Instruction) -> Instruction | None:
         progress = self.book.progress.load()
         if progress is not None and progress.phase == Phase.COMPLETE:
-            self.events.append("完本期派发已丢弃")
+            self.emit("完本期派发已丢弃")
             return None
         if instruction.agent == "writer" and _chapter_needs_expansion(self.book, instruction.chapter or (progress.next_chapter() if progress else 0)):
             return Instruction(
@@ -156,7 +165,7 @@ class Engine:
         )
         meta.planning_tier = "short" if decision["planner"] == "architect_short" else "long"
         self.book.run_meta.save(meta)
-        self.events.append(f"启动裁定已补齐：{decision['planner']}")
+        self.emit(f"启动裁定已补齐：{decision['planner']}")
         return Instruction(agent=decision["planner"], task=decision["task"], reason=decision["reason"])
 
     def _track_deadlock(self, instruction: Instruction) -> Instruction | None:
@@ -192,13 +201,13 @@ class Engine:
         return None
 
     def _remember_failure(self, instruction: Instruction, exc: Exception) -> None:
-        self.events.append(f"{instruction.agent} 失败：{exc}")
+        self.emit(f"{instruction.agent} 失败：{exc}")
 
     def _handle_worker_error(self, instruction: Instruction, exc: Exception) -> bool:
         key = f"{instruction.agent}\n{instruction.task}"
         if self._failed_key != key:
             self._failed_key = key
-            self.events.append("同一指令将再跑一次")
+            self.emit("同一指令将再跑一次")
             return False
         facts = self._failure_facts("worker_failure", instruction, str(exc))
         try:
@@ -248,7 +257,7 @@ class Engine:
     def _pause(self, reason: str) -> None:
         self.paused = True
         self.pause_reason = reason
-        self.events.append(reason)
+        self.emit(reason)
 
 
 def _chapter_needs_expansion(book: Book, chapter: int) -> bool:

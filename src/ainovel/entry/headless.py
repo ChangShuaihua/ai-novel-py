@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from ainovel.host.config import ConfigError
 from ainovel.host.host import Host, HostError
@@ -35,7 +36,68 @@ def main(argv: list[str] | None = None) -> int:
     nxt = commands.add_parser("next")
     nxt.add_argument("directory")
 
+    diag = commands.add_parser("diag")
+    diag.add_argument("directory")
+
+    export = commands.add_parser("export")
+    export.add_argument("directory")
+    export.add_argument("dest")
+
+    evaluate = commands.add_parser("eval")
+    evaluate.add_argument("directory")
+    evaluate.add_argument("--left", default="")
+    evaluate.add_argument("--right", required=True)
+
+    tui = commands.add_parser("tui")
+    tui.add_argument("directory")
+
+    import_book = commands.add_parser("import")
+    import_book.add_argument("directory")
+    import_book.add_argument("source")
+    import_book.add_argument("--yes", action="store_true")
+
     args = parser.parse_args(argv)
+    if args.command == "diag":
+        from ainovel.diag import diagnose, render_diagnosis
+
+        print(render_diagnosis(diagnose(args.directory)))
+        return 0
+    if args.command == "export":
+        from ainovel.exporting import export_txt
+
+        print(export_txt(args.directory, args.dest))
+        return 0
+    if args.command == "eval":
+        from pathlib import Path
+
+        from ainovel.evalrun import compare_styles
+
+        result = compare_styles(Path(args.directory), args.left, args.right)
+        print("same" if result["same"] else "different")
+        return 0
+    if args.command == "tui":
+        from ainovel.entry.tui import run_tui
+
+        run_tui(args.directory)
+        return 0
+    if args.command == "import":
+        from ainovel.host.config import load_config
+        from ainovel.host.host import completer_from_config
+        from ainovel.importers.pipeline import ImportError as ImportFailed
+        from ainovel.importers.pipeline import ingest, run
+
+        root = Path(args.directory)
+        source = Path(args.source)
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            if not (root / "meta" / "import" / "source.txt").is_file():
+                ingest(root, source.name, source.read_text(encoding="utf-8"), auto_confirm=args.yes)
+            result = run(root, completer_from_config(load_config()), accept=args.yes)
+        except (ConfigError, ImportFailed, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(result["status"])
+        return 0
     try:
         host = Host.open(args.directory)
         try:

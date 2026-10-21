@@ -89,6 +89,9 @@ class Host:
     def close(self) -> None:
         self.lock.release()
 
+    def subscribe(self, listener) -> None:
+        self.engine.subscribe(listener)
+
     def start(self, requirement: str, *, max_rounds: int | None = None) -> RunResult:
         self.book.progress.save(Progress(phase=Phase.INIT))
         self.book.checkpoints.reset()
@@ -124,7 +127,7 @@ class Host:
 
     def resume(self, *, max_rounds: int | None = None) -> RunResult:
         for warning in consistency_warnings(self.book):
-            self.engine.events.append(warning)
+            self.engine.emit(warning)
         meta = self.book.run_meta.load()
         if meta is not None and meta.pending_steer:
             return self.steer(meta.pending_steer, max_rounds=max_rounds)
@@ -142,7 +145,7 @@ class Host:
         except (ValueError, UnsupportedAdvanceModeError) as exc:
             raise HostError(str(exc)) from exc
         label = "逐章验收" if mode == "review" else "自动推进"
-        self.engine.events.append(f"章节推进模式已切换为{label}")
+        self.engine.emit(f"章节推进模式已切换为{label}")
 
     def advance_one_chapter(self, *, max_rounds: int | None = None) -> RunResult:
         meta = self.book.run_meta.load()
@@ -163,7 +166,7 @@ class Host:
             self.book.run_meta.grant_advance_permit(target)
         except ValueError as exc:
             raise HostError(str(exc)) from exc
-        self.engine.events.append(f"已放行第 {target} 章")
+        self.engine.emit(f"已放行第 {target} 章")
         return self.engine.run(max_rounds=max_rounds)
 
     def steer(self, text: str, *, max_rounds: int | None = None) -> RunResult:
@@ -204,7 +207,7 @@ class Host:
     def _apply_intervention(self, decision: dict) -> bool:
         answer = str(decision.get("answer") or "").strip()
         if answer:
-            self.engine.events.append(answer)
+            self.engine.emit(answer)
         rules = str(decision.get("rules") or "").strip()
         if rules:
             save_runtime_rule(self.book.root, rules)
