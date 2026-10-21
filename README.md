@@ -35,4 +35,4 @@
 
 ## 当前状态
 
-阶段 1 和阶段 2 已实现。`ainovel.domain` 与 `ainovel.store` 负责书籍目录；`ainovel.flow.route` 按事实决定下一步，本身不读文件。工具和模型循环还没有。
+阶段 1 到阶段 3 已实现。`ainovel.domain` 与 `ainovel.store` 负责书籍目录；`ainovel.flow.route` 按事实决定下一步，本身不读文件。`ainovel.tools` 提供读上下文、写章、审阅和设定保存，提交按 Saga 恢复。模型循环还没有。
