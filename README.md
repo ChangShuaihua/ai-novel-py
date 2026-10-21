@@ -17,7 +17,7 @@
 
 - Python 3.12
 - 领域模型和裁定结果用 `pydantic`
-- 命令行用 `typer`
+- 无界面入口用标准库 `argparse`（`python -m ainovel.entry.headless`）
 - 第一版入口是无界面持续运行；终端界面用 Textual，放在后置阶段
 
 ## 文档
@@ -35,4 +35,4 @@
 
 ## 当前状态
 
-阶段 1 到阶段 5 已实现。`ainovel.domain` 与 `ainovel.store` 负责书籍目录；`ainovel.flow.route` 按事实决定下一步，本身不读文件。`ainovel.tools` 提供读上下文、写章、审阅和设定保存，提交按 Saga 恢复。`ainovel.llm` 负责流式补全、超时重试和角色备用提供方；`ainovel.agents.run_agent` 是薄代理循环。`build_workers` 装配短篇规划师、长篇规划师、写作者和审阅者，文风经 `build_writer_prompt` 填入 `{{VOICE}}`。引擎、裁定和无界面入口还没有。真实模型调用需要安装 `litellm`（`pip install -e ".[llm]"`）。
+阶段 1 到阶段 6 已实现。`ainovel.domain` 与 `ainovel.store` 负责书籍目录；`ainovel.flow.route` 按事实决定下一步，本身不读文件。`ainovel.tools` 提供读上下文、写章、审阅和设定保存，提交按 Saga 恢复。`ainovel.llm` 负责流式补全、超时重试和角色备用提供方；`ainovel.agents.run_agent` 是薄代理循环。`build_workers` 装配短篇规划师、长篇规划师、写作者和审阅者，文风经 `build_writer_prompt` 填入 `{{VOICE}}`。`ainovel.host` 串起裁定、引擎和书籍租约；`python -m ainovel.entry.headless` 可以启动、恢复、继续和干预。缺配置时失败信息指向 `~/.ainovel/`。真实模型调用需要安装 `litellm`（`pip install -e ".[llm]"`）。

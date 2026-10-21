@@ -5,7 +5,8 @@ import json
 from ainovel.domain.book import BookMetadata
 from ainovel.domain.checkpoint import global_scope
 from ainovel.domain.run_meta import PlanningTier
-from ainovel.domain.transitions import Phase, can_transition_phase
+from ainovel.domain.progress import Progress
+from ainovel.domain.transitions import FlowState, Phase, can_transition_phase
 from ainovel.flow.outline import repair_indexes
 from ainovel.store.book import Book
 from ainovel.tools.errors import ToolArgsError, ToolConflict
@@ -90,7 +91,19 @@ def audit_foundation(book: Book, args: dict) -> dict:
     record = {"notes": str(args.get("notes") or ""), "fingerprint": _fingerprint(book)}
     write_json(book.root, "meta/foundation_audit.json", record)
     remember(book, global_scope(), "foundation_audit", "meta/foundation_audit.json", digest_text(record["fingerprint"]))
-    return {"audited": True, "fingerprint": record["fingerprint"], "next_step": "novel_context"}
+    progress = book.progress.load() or Progress(phase=Phase.WRITING, flow=FlowState.WRITING)
+    if progress.phase not in (Phase.WRITING, Phase.COMPLETE):
+        progress.phase = Phase.WRITING
+        if progress.flow is None:
+            progress.flow = FlowState.WRITING
+        book.progress.save(progress)
+    return {
+        "audited": True,
+        "foundation_ready": True,
+        "phase": Phase.WRITING.value,
+        "fingerprint": record["fingerprint"],
+        "next_step": "novel_context",
+    }
 
 
 def expand_next_arc(book: Book, args: dict) -> dict:
