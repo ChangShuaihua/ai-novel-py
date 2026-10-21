@@ -11,6 +11,9 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+llm = [
+    "litellm>=1.74",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
