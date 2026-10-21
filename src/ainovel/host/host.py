@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ainovel.agents.workers import build_workers
 from ainovel.arbiter.decide import ArbiterError, decide_intervention, decide_plan_start
+from ainovel.domain.errors import UnsupportedAdvanceModeError
 from ainovel.domain.progress import Progress
 from ainovel.domain.run_meta import AdvanceHold, PlanStartRecord
 from ainovel.domain.transitions import Phase
@@ -15,9 +16,9 @@ from ainovel.host.engine import Engine, RunResult
 from ainovel.llm.litellm_client import LiteLLMTransport
 from ainovel.llm.policy import RoleClient
 from ainovel.llm.types import ModelRef, RoleModel
+from ainovel.rules import save_runtime_rule
 from ainovel.store.book import Book
 from ainovel.store.decisions import DecisionStore
-from ainovel.store.io import IO
 from ainovel.store.paths import chapter_number
 from ainovel.voice import load_bundle
 
@@ -135,6 +136,36 @@ class Host:
     def abort(self) -> None:
         self.engine.abort()
 
+    def set_advance_mode(self, mode: str) -> None:
+        try:
+            self.book.run_meta.set_advance_mode(mode)
+        except (ValueError, UnsupportedAdvanceModeError) as exc:
+            raise HostError(str(exc)) from exc
+        label = "逐章验收" if mode == "review" else "自动推进"
+        self.engine.events.append(f"章节推进模式已切换为{label}")
+
+    def advance_one_chapter(self, *, max_rounds: int | None = None) -> RunResult:
+        meta = self.book.run_meta.load()
+        if meta is None:
+            raise HostError("RunMeta 未初始化")
+        if meta.advance_mode != "review":
+            raise HostError("/next 仅用于逐章验收模式，请先执行 /review on")
+        if meta.advance_hold is not None:
+            raise HostError(f"仍有一次性暂停意图待处理（{meta.advance_hold.reason}），请先恢复或完成当前干预")
+        progress = self.book.progress.load()
+        if progress is None or progress.phase != Phase.WRITING:
+            phase = progress.phase.value if progress is not None else "<nil>"
+            raise HostError(f"当前阶段不能授权新章（phase={phase}）")
+        target = progress.next_chapter()
+        if target <= 0:
+            raise HostError("无法从当前进度推导下一章")
+        try:
+            self.book.run_meta.grant_advance_permit(target)
+        except ValueError as exc:
+            raise HostError(str(exc)) from exc
+        self.engine.events.append(f"已放行第 {target} 章")
+        return self.engine.run(max_rounds=max_rounds)
+
     def steer(self, text: str, *, max_rounds: int | None = None) -> RunResult:
         meta = self.book.run_meta.load() or self.book.run_meta.init(style="", provider="", model="")
         meta.pending_steer = text
@@ -176,7 +207,11 @@ class Host:
             self.engine.events.append(answer)
         rules = str(decision.get("rules") or "").strip()
         if rules:
-            IO(self.book.root).write_json("meta/user_rules.json", {"text": rules})
+            save_runtime_rule(self.book.root, rules)
+        dispatch = decision.get("dispatch")
+        hold = decision.get("hold")
+        if isinstance(dispatch, dict) and isinstance(hold, dict) and not hold.get("cancel"):
+            self.engine.defer_gate = True
         hold = decision.get("hold")
         if isinstance(hold, dict):
             meta = self.book.run_meta.load()

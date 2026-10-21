@@ -99,6 +99,10 @@ def commit_chapter(book: Book, args: dict) -> dict:
     if pending is None:
         replay = _replay_stable_commit(book, chapter)
         if replay is not None:
+            final = read_text(book.root, final_path(chapter)) or ""
+            from ainovel.stylestats import index_for
+
+            index_for(book).upsert(book, chapter, final)
             return replay
         pending = _freeze_new_commit(book, chapter, args)
     return _resume(book, pending)
@@ -246,9 +250,12 @@ def _result_from_pending(book: Book, pending: PendingCommit, progress: Progress 
         "needs_expansion": bool(boundary and boundary.needs_expansion),
         "review_required": (not progress.layered) and due,
         "book_complete": progress.phase == Phase.COMPLETE,
-        "rule_violations": [],
+        "rule_violations": _rule_violations(book, pending.draft_content),
         "summary": pending.summary,
     }
+    from ainovel.stylestats import index_for
+
+    index_for(book).upsert(book, pending.chapter, pending.draft_content)
     return result
 
 
@@ -264,6 +271,12 @@ def _require_commit_target(progress: Progress, chapter: int) -> None:
     expected = progress.next_chapter()
     if chapter != expected:
         raise ToolConflict(f"正常续写只能提交下一章 {expected}，收到第 {chapter} 章")
+
+
+def _rule_violations(book: Book, text: str) -> list[dict]:
+    from ainovel.rules import check_text, load_snapshot
+
+    return check_text(text, load_snapshot(book.root))
 
 
 def _require_progress(book: Book) -> Progress:

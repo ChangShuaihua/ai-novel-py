@@ -5,10 +5,12 @@ from typing import Any
 
 from ainovel.domain.book import BookMetadata
 from ainovel.domain.commit import PendingCommit, prepare_pending_commit
+from ainovel.domain.errors import UnsupportedAdvanceModeError
 from ainovel.domain.progress import Progress
 from ainovel.domain.run_meta import (
     ChapterAdvanceMode,
     RunMeta,
+    advance_mode_supported,
     validate_advance_control,
 )
 from ainovel.domain.transitions import FlowState, Phase, validate_phase_transition
@@ -136,6 +138,65 @@ class RunMetaStore:
                 meta.advance_hold = existing.advance_hold
             if not meta.advance_mode:
                 meta.advance_mode = ChapterAdvanceMode.AUTO
+            validate_advance_control(meta)
+            self._io.write_json_unlocked("meta/run.json", meta.to_disk())
+            return meta
+
+    def set_advance_mode(self, mode: str) -> RunMeta:
+        if not advance_mode_supported(mode):
+            raise UnsupportedAdvanceModeError(mode)
+        with self._io.exclusive():
+            meta = self._load_unlocked()
+            if meta is None:
+                raise ValueError("run meta 未初始化")
+            meta.advance_mode = mode
+            if mode == ChapterAdvanceMode.AUTO:
+                meta.advance_permit_chapter = 0
+            validate_advance_control(meta)
+            self._io.write_json_unlocked("meta/run.json", meta.to_disk())
+            return meta
+
+    def grant_advance_permit(self, chapter: int) -> RunMeta:
+        if chapter <= 0:
+            raise ValueError(f"章节许可必须大于 0: {chapter}")
+        with self._io.exclusive():
+            meta = self._load_unlocked()
+            if meta is None:
+                raise ValueError("run meta 未初始化")
+            if meta.advance_mode != ChapterAdvanceMode.REVIEW:
+                raise ValueError(f"仅逐章验收模式可授权下一章（当前 {meta.advance_mode}）")
+            if meta.advance_permit_chapter not in (0, chapter):
+                raise ValueError(f"已有第 {meta.advance_permit_chapter} 章许可，拒绝覆盖为第 {chapter} 章")
+            meta.advance_permit_chapter = chapter
+            validate_advance_control(meta)
+            self._io.write_json_unlocked("meta/run.json", meta.to_disk())
+            return meta
+
+    def clear_advance_permit(self, chapter: int) -> RunMeta | None:
+        with self._io.exclusive():
+            meta = self._load_unlocked()
+            if meta is None or meta.advance_permit_chapter == 0:
+                return meta
+            if meta.advance_permit_chapter != chapter:
+                raise ValueError(f"章节许可已变化：期望第 {chapter} 章，实际第 {meta.advance_permit_chapter} 章")
+            meta.advance_permit_chapter = 0
+            validate_advance_control(meta)
+            self._io.write_json_unlocked("meta/run.json", meta.to_disk())
+            return meta
+
+    def clear_advance_hold(self, expected) -> RunMeta | None:
+        with self._io.exclusive():
+            meta = self._load_unlocked()
+            if meta is None or meta.advance_hold is None:
+                return meta
+            current = meta.advance_hold
+            if (
+                current.after != expected.after
+                or current.target_chapter != expected.target_chapter
+                or current.reason != expected.reason
+            ):
+                raise ValueError("一次性暂停已变化，不能清掉另一条意图")
+            meta.advance_hold = None
             validate_advance_control(meta)
             self._io.write_json_unlocked("meta/run.json", meta.to_disk())
             return meta

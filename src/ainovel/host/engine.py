@@ -10,6 +10,7 @@ from ainovel.flow.load import foundation_missing, load_state
 from ainovel.flow.model import Instruction
 from ainovel.flow.outline import repair_indexes
 from ainovel.flow.route import route
+from ainovel.host.gate import ChapterAdvanceGate
 from ainovel.host.report import render_report
 from ainovel.store.book import Book
 from ainovel.store.decisions import DecisionStore
@@ -42,6 +43,8 @@ class Engine:
         self._last_key = ""
         self._repeats = 0
         self._failed_key = ""
+        self.defer_gate = False
+        self.gate = ChapterAdvanceGate(book, self._pause)
 
     def enqueue(self, instruction: Instruction) -> None:
         self._queued = instruction
@@ -54,11 +57,17 @@ class Engine:
         while not self.cancelled and not self.paused:
             if max_rounds is not None and rounds >= max_rounds:
                 break
+            defer_gate = self.defer_gate
+            self.defer_gate = False
+            if not defer_gate and self.gate.handle_boundary():
+                break
             instruction = self._next_instruction()
             if instruction is None:
                 break
             instruction = self._track_deadlock(instruction)
             if instruction is None:
+                break
+            if not self.gate.allow(instruction):
                 break
             try:
                 self.workers[instruction.agent].run(self.completer, self.book, instruction.task)

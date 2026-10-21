@@ -1,10 +1,14 @@
 """读工具。不改文件，不写检查点。"""
 
+import json
+
 from ainovel.domain.context import context_profile
 from ainovel.flow.load import foundation_missing
 from ainovel.flow.outline import check_arc_boundary, repair_indexes
+from ainovel.rules import check_text, load_snapshot, payload as rules_payload
 from ainovel.store.book import Book
 from ainovel.store.paths import chapter_number
+from ainovel.stylestats import index_for
 from ainovel.tools.errors import ToolArgsError, ToolConflict
 from ainovel.tools.files import final_path, read_json, read_text
 
@@ -16,13 +20,18 @@ def novel_context(book: Book, args: dict) -> dict:
     chapter = int(args.get("chapter") or 0)
     volume = args.get("volume")
     arc = args.get("arc")
+    snapshot = load_snapshot(book.root)
     payload = {
         "foundation_status": {"missing": foundation_missing(book.root)},
-        "user_rules": read_json(book.root, "meta/user_rules.json"),
+        "user_rules": rules_payload(snapshot),
         "summary_window": profile.summary_window,
+        "timeline_window": profile.timeline_window,
         "layered": profile.layered,
-        "related_chapters": _related(book, total) if total > 30 else [],
+        "related_chapters": _related(book, chapter) if total > 30 else [],
     }
+    stats = index_for(book).sync(book)
+    if stats is not None:
+        payload["style_stats"] = stats
     if volume is not None and arc is not None:
         payload["arc"] = _arc_view(book, int(volume), int(arc))
         payload["next_step"] = "save_foundation"
@@ -30,7 +39,15 @@ def novel_context(book: Book, args: dict) -> dict:
     if chapter > 0:
         payload["chapter"] = chapter
         payload["recent_summaries"] = _recent_summaries(book, chapter, profile.summary_window)
+        payload["timeline"] = _timeline(book, chapter, profile.timeline_window)
         payload["next_outline"] = _outline_entry(book, chapter + 1)
+        if profile.layered:
+            _load_layered(book, payload, chapter)
+        text = read_text(book.root, final_path(chapter))
+        if text:
+            violations = check_text(text, snapshot)
+            if violations:
+                payload["rule_violations"] = violations
         payload["next_step"] = "read_chapter" if chapter > 1 else "plan_chapter"
     else:
         payload["outline_feedback"] = _feedback(book)
@@ -96,7 +113,7 @@ def json_line(line: str) -> dict:
     return payload
 
 
-def _related(book: Book, _total: int) -> list[dict]:
+def _related(book: Book, chapter: int) -> list[dict]:
     found: list[dict] = []
     for kind, relative in (
         ("foreshadow", "meta/foreshadow.jsonl"),
@@ -111,10 +128,73 @@ def _related(book: Book, _total: int) -> list[dict]:
             if not line.strip():
                 continue
             item = json_line(line)
-            chapter = int(item.get("chapter") or 0)
-            if chapter > 0:
-                found.append({"kind": kind, "chapter": chapter, "reason": item.get("reason") or kind})
+            number = int(item.get("chapter") or 0)
+            if number <= 0 or (chapter > 0 and number >= chapter):
+                continue
+            if kind == "foreshadow" and (item.get("resolved") or str(item.get("status") or "") in ("resolved", "closed")):
+                continue
+            reason = str(item.get("reason") or item.get("note") or item.get("text") or kind)
+            found.append({"kind": kind, "chapter": number, "reason": reason})
     return found
+
+
+def _timeline(book: Book, chapter: int, window: int) -> list[dict]:
+    text = read_text(book.root, "timeline.jsonl")
+    if not text:
+        return []
+    rows = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        item = json_line(line)
+        if int(item.get("chapter") or 0) < chapter:
+            rows.append(item)
+    return rows[-window:]
+
+
+def _load_layered(book: Book, payload: dict, chapter: int) -> None:
+    payload["volume_summaries"] = _summary_files(book, "vol-v")
+    volume, arc = _locate(book, chapter)
+    prior = []
+    for item in _summary_files(book, "arc-v"):
+        if volume and int(item.get("volume") or 0) == volume and int(item.get("arc") or 0) < arc:
+            prior.append(item)
+    payload["arc_summaries"] = prior
+    snapshots = []
+    for item in _summary_files(book, "arc-v"):
+        if item.get("character_snapshots"):
+            snapshots = list(item["character_snapshots"])
+    if snapshots:
+        payload["character_snapshots"] = snapshots
+
+
+def _summary_files(book: Book, prefix: str) -> list[dict]:
+    root = book.root / "summaries"
+    if not root.is_dir():
+        return []
+    rows = []
+    for path in sorted(root.glob(f"{prefix}*.json")):
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def _locate(book: Book, chapter: int) -> tuple[int, int]:
+    raw = read_json(book.root, "layered_outline.json")
+    if not isinstance(raw, list):
+        return 0, 0
+    cursor = 1
+    for volume in repair_indexes(raw):
+        for arc in volume.get("arcs") or []:
+            count = len(arc.get("chapters") or [])
+            if count and cursor <= chapter < cursor + count:
+                return int(volume.get("index") or 0), int(arc.get("index") or 0)
+            cursor += count
+    return 0, 0
 
 
 def _arc_view(book: Book, volume: int, arc: int) -> dict:

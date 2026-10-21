@@ -18,9 +18,12 @@ from ainovel.agents.catalog import (
 )
 from ainovel.agents.loop import AgentResult, run_agent
 from ainovel.llm.types import ToolSpec
+from ainovel.contextpack import WriterContext
 from ainovel.store.book import Book
 from ainovel.tools import call_tool
 from ainovel.voice import Bundle, build_writer_prompt, load_bundle
+
+_WRITER_BUDGET = 120_000
 
 _ARCHITECT_BLOCK = (
     "你必须调用 save_book、save_foundation、expand_next_arc、revise_outline、"
@@ -45,7 +48,9 @@ class Worker:
     def tool_names(self) -> tuple[str, ...]:
         return tuple(spec.name for spec in self.tool_specs)
 
-    def run(self, completer, book: Book, task: str, *, max_turns: int | None = None) -> AgentResult:
+    def run(self, completer, book: Book, task: str, *, max_turns: int | None = None, context_budget: int | None = None) -> AgentResult:
+        if self.name == "writer":
+            completer = WriterContext(completer, book, _WRITER_BUDGET if context_budget is None else context_budget)
         return run_agent(
             completer,
             system_prompt=self.system_prompt,

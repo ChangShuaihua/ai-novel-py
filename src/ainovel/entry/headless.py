@@ -28,6 +28,13 @@ def main(argv: list[str] | None = None) -> int:
     abort = commands.add_parser("abort")
     abort.add_argument("directory")
 
+    review = commands.add_parser("review")
+    review.add_argument("directory")
+    review.add_argument("mode", choices=("on", "off"))
+
+    nxt = commands.add_parser("next")
+    nxt.add_argument("directory")
+
     args = parser.parse_args(argv)
     try:
         host = Host.open(args.directory)
@@ -40,6 +47,12 @@ def main(argv: list[str] | None = None) -> int:
                 result = host.continue_book()
             elif args.command == "steer":
                 result = host.steer(args.text)
+            elif args.command == "review":
+                host.set_advance_mode("review" if args.mode == "on" else "auto")
+                print("逐章验收" if args.mode == "on" else "自动推进")
+                return 0
+            elif args.command == "next":
+                result = host.advance_one_chapter()
             else:
                 host.abort()
                 print("已请求暂停")
