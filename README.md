@@ -2,7 +2,7 @@
 
 全自动长篇小说创作引擎。确定性引擎按书目录里的事实调度规划、写作和审阅；模型只在开放创作和少量语义裁定处被调用。从一句话需求写到完整小说，进程结束后从最近落盘的一步继续。
 
-规格来自同级目录的 [ainovel-cli](../ainovel-cli)。阶段 1 到阶段 8 已落地，见 [实现顺序](docs/08-roadmap.md)。
+阶段 1 到阶段 8 已落地，见 [实现顺序](docs/08-roadmap.md)。规格见 [文档](docs/01-architecture.md)。
 
 ## 安装
 
@@ -97,10 +97,10 @@ python -m ainovel.entry.headless import books/demo novel.txt --yes
 
 ## 引擎在做什么
 
-一个串行引擎，一条纯函数路由，四类裁定，三个创作代理。
+一个串行引擎，一条纯函数路由，四类裁定，三个创作代理。代理循环只负责工具调用、写完即停、检查点护栏和写作者上下文压缩。
 
 1. 启动裁定选择短篇或长篇规划师，并把结果写入 `meta/run.json`。记录还在时，恢复不会重新问模型。
-2. 规划师把书名、前提、大纲、角色和世界规则写在书目录根上，不使用 `foundation/` 子目录。
+2. 规划师把书名、前提、大纲、角色和世界规则写在书目录根上。
 3. 写作者按计划、草稿、一致性检查、提交的顺序完成一章。提交用 Saga：中断后从冻结的草稿恢复，不采用新的模型参数。
 4. 审阅者在弧末给出结论、弧摘要，需要时写卷摘要。规划师再展开下一弧。
 5. 路由只读已经装入内存的事实，决定下一步派谁。完本报告用已有字数和结构渲染，不再调用模型。完本后再次运行不会自己续写。
@@ -109,7 +109,7 @@ python -m ainovel.entry.headless import books/demo novel.txt --yes
 
 ## 书籍目录
 
-字段名与 Go 版一致。章节文件 `chapters/01.md` 起，第 100 章是 `chapters/100.md`。
+章节文件 `chapters/01.md` 起，第 100 章是 `chapters/100.md`。
 
 ```text
 书目录/
@@ -129,12 +129,6 @@ python -m ainovel.entry.headless import books/demo novel.txt --yes
 ```
 
 分层书另有 `layered_outline.json` 和 `meta/compass.json`。完整清单见 [领域模型与书籍目录](docs/02-domain-store.md)。
-
-## 和 Go 版的关系
-
-- 一本书的目录、文件名和 JSON 字段对齐。Python 版不改已有书的格式；对不齐时改 Python。
-- 调度、阶段、幂等和提交恢复照同一套控制面执行：事实层确定，语义层自主。
-- 不移植 Go 的 `agentcore`。这里的代理循环只负责工具调用、写完即停、检查点护栏和写作者上下文压缩。
 
 ## 文档
 

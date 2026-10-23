@@ -93,7 +93,7 @@ reason     非空
 
 ## 提示词资产
 
-实现阶段从 Go 版 `assets/` 迁入，保持文件名，便于对照：
+提示词放在 `assets/`，文件名固定：
 
 ```text
 assets/prompts/   architect-short.md、architect-long.md、writer.md、editor.md

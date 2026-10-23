@@ -144,7 +144,7 @@ def route(state: RouteState) -> Instruction | None:
 
 
 def _planner(tier: str) -> str:
-    """与 Go 路由相同：只有 short 用短篇规划师，其余（含尚未落盘的空值）用长篇规划师。"""
+    """只有 short 用短篇规划师，其余（含尚未落盘的空值）用长篇规划师。"""
     if tier == "short":
         return "architect_short"
     return "architect_long"

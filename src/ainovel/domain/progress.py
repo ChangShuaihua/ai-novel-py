@@ -1,4 +1,4 @@
-"""进度事实。JSON 字段名与 Go 版 meta/progress.json 一致。"""
+"""进度事实，落在 meta/progress.json。"""
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -69,7 +69,7 @@ class Progress(BaseModel):
         return self.latest_completed() + 1
 
     def to_disk(self) -> dict[str, object]:
-        """按 Go omitempty 写出。必填字段始终保留。"""
+        """空的可选字段不写出。必填字段始终保留。"""
         payload: dict[str, object] = {
             "phase": self.phase.value,
             "current_chapter": self.current_chapter,

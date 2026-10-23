@@ -1,4 +1,4 @@
-"""时间字段与 Go encoding/json 的 RFC3339 对齐。"""
+"""时间字段使用 RFC3339。"""
 
 from datetime import datetime, timezone
 
