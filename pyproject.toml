@@ -13,6 +13,7 @@ dev = [
 ]
 llm = [
     "litellm>=1.74",
+    "mcp>=2.2,<3",
 ]
 
 [build-system]
