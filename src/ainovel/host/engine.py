@@ -46,12 +46,18 @@ class Engine:
         self._failed_key = ""
         self.defer_gate = False
         self.gate = ChapterAdvanceGate(book, self._pause)
+        self.latest_instruction: Instruction | None = None
+        self._yield = False
 
     def enqueue(self, instruction: Instruction) -> None:
         self._queued = instruction
 
     def abort(self) -> None:
         self.cancelled = True
+
+    def request_yield(self) -> None:
+        """当前指令结束后退出循环，不记成暂停。界面借这个边界插入干预。"""
+        self._yield = True
 
     def subscribe(self, listener) -> None:
         self.listeners.append(listener)
@@ -64,6 +70,9 @@ class Engine:
     def run(self, *, max_rounds: int | None = None) -> RunResult:
         rounds = 0
         while not self.cancelled and not self.paused:
+            if self._yield:
+                self._yield = False
+                break
             if max_rounds is not None and rounds >= max_rounds:
                 break
             defer_gate = self.defer_gate
@@ -78,6 +87,7 @@ class Engine:
                 break
             if not self.gate.allow(instruction):
                 break
+            self.latest_instruction = instruction
             try:
                 self.workers[instruction.agent].run(self.completer, self.book, instruction.task)
             except KeyError:

@@ -32,6 +32,10 @@ class BookLock:
         self.path = root / ".ainovel.lock"
         self._fd: int | None = None
 
+    @property
+    def held(self) -> bool:
+        return self._fd is not None
+
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         try:

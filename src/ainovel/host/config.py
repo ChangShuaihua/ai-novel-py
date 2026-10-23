@@ -43,3 +43,56 @@ def load_config(path: Path | None = None) -> AppConfig:
     if not isinstance(raw, dict) or not str(raw.get("provider") or "").strip() or not str(raw.get("model") or "").strip():
         raise ConfigError(f"{home} 的 config.json 必须写明 provider 和 model。")
     return AppConfig.model_validate(raw)
+
+
+def describe_model(config: AppConfig | None) -> dict:
+    """给界面的模型状态。不含密钥正文。"""
+    if config is None:
+        return {
+            "ready": False,
+            "provider": "",
+            "model": "",
+            "api_base": "",
+            "style": "",
+            "api_key_set": False,
+            "key_hint": "",
+        }
+    key = config.api_key or ""
+    return {
+        "ready": bool(config.provider.strip() and config.model.strip()),
+        "provider": config.provider,
+        "model": config.model,
+        "api_base": config.api_base,
+        "style": config.style,
+        "api_key_set": bool(key),
+        "key_hint": f"····{key[-4:]}" if len(key) >= 8 else "",
+    }
+
+
+def store_config(
+    path: Path,
+    *,
+    provider: str,
+    model: str,
+    api_key: str,
+    api_base: str,
+    style: str,
+) -> None:
+    """写回配置。原文件里的其他字段（例如 roles）保留。"""
+    raw: dict = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = None
+        if isinstance(loaded, dict):
+            raw = loaded
+    raw["provider"] = provider
+    raw["model"] = model
+    raw["api_key"] = api_key
+    raw["api_base"] = api_base
+    raw["style"] = style
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
