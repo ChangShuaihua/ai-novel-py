@@ -51,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     tui = commands.add_parser("tui")
     tui.add_argument("directory")
 
+    web = commands.add_parser("web")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
+
     import_book = commands.add_parser("import")
     import_book.add_argument("directory")
     import_book.add_argument("source")
@@ -79,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
         from ainovel.entry.tui import run_tui
 
         run_tui(args.directory)
+        return 0
+    if args.command == "web":
+        from ainovel.entry.web import serve
+
+        serve(host=args.host, port=args.port)
         return 0
     if args.command == "import":
         from ainovel.host.config import load_config
