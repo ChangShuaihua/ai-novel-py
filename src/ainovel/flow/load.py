@@ -77,11 +77,6 @@ def foundation_missing(root: Path) -> list[str]:
     premise = _optional_text(root / "premise.md")
     if premise is None or premise == "":
         missing.append("premise")
-    outline = _optional_json(root / "outline.json")
-    if not isinstance(outline, list) or len(outline) == 0:
-        if outline is not None and not isinstance(outline, list):
-            raise LoadStateError("load outline: outline.json 必须是数组")
-        missing.append("outline")
     characters = _optional_json(root / "characters.json")
     if not isinstance(characters, list) or len(characters) == 0:
         if characters is not None and not isinstance(characters, list):
@@ -92,15 +87,25 @@ def foundation_missing(root: Path) -> list[str]:
         if rules is not None and not isinstance(rules, list):
             raise LoadStateError("load world rules: world_rules.json 必须是数组")
         missing.append("world_rules")
+    progress = _optional_json(root / "meta" / "progress.json")
+    layered_book = isinstance(progress, dict) and bool(progress.get("layered"))
     layered = _optional_json(root / "layered_outline.json")
-    if isinstance(layered, list) and layered:
-        if _optional_json(root / "meta" / "compass.json") is None:
-            missing.append("compass")
-    elif layered is not None and not isinstance(layered, list):
+    if layered is not None and not isinstance(layered, list):
         raise LoadStateError("load layered outline: layered_outline.json 必须是数组")
+    layered_ok = isinstance(layered, list) and len(layered) > 0
+    if layered_book or layered_ok:
+        if not layered_ok:
+            missing.append("layered_outline")
+        elif _optional_json(root / "meta" / "compass.json") is None:
+            missing.append("compass")
+    else:
+        outline = _optional_json(root / "outline.json")
+        if not isinstance(outline, list) or len(outline) == 0:
+            if outline is not None and not isinstance(outline, list):
+                raise LoadStateError("load outline: outline.json 必须是数组")
+            missing.append("outline")
     if missing:
         return missing
-    progress = _optional_json(root / "meta" / "progress.json")
     phase = ""
     if isinstance(progress, dict):
         phase = str(progress.get("phase") or "")

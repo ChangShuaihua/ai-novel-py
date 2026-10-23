@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from ainovel.domain.progress import Progress
+from ainovel.domain.run_meta import RunMeta
 from ainovel.domain.transitions import Phase
 from ainovel.flow.load import LoadStateError, load_state
 from ainovel.flow.model import AggregateKind
@@ -52,6 +53,32 @@ def test_load_state_ignores_ordinary_feedback(tmp_path: Path):
     got = route(state)
     assert got is not None and got.agent == "architect_long"
     assert "writer_feedback" in got.task
+
+
+def test_layered_outline_stands_in_for_flat_outline(tmp_path: Path):
+    _write(tmp_path / "meta" / "book.json", json.dumps({"title": "赊命长生", "synopsis": "雨天醒来。"}))
+    _write(tmp_path / "premise.md", "雨天醒来。")
+    _write(tmp_path / "characters.json", json.dumps([{"name": "他"}]))
+    _write(tmp_path / "world_rules.json", json.dumps([{"rule": "雨声不断"}]))
+    _write(tmp_path / "layered_outline.json", json.dumps([{"arcs": [{"chapters": [{}, {}]}]}]))
+    _write(tmp_path / "meta" / "compass.json", json.dumps({"ending_direction": "雨停"}))
+    _write(tmp_path / "meta" / "progress.json", json.dumps({
+        "phase": "outline",
+        "layered": True,
+        "total_chapters": 12,
+        "completed_chapters": [],
+        "current_chapter": 0,
+        "total_word_count": 0,
+    }))
+    book = Book.open(tmp_path, writable=True)
+    book.run_meta.save(RunMeta(planning_tier="long", advance_mode="auto"))
+    state = load_state(book)
+    assert state.foundation_missing == ["foundation_audit"]
+    got = route(state)
+    assert got is not None
+    assert got.agent == "architect_long"
+    assert "audit_foundation" in got.task
+    assert "outline" not in got.task
 
 
 def test_load_state_layered_arc_end_and_foundation(tmp_path: Path):

@@ -19,7 +19,7 @@ chapter  写作者涉及的章节号；规划师和审阅者没有章节时为 0
 - `last_completed`：已完成章的最大号
 - `arc_boundary`：上一章是否弧末，以及卷号、弧号、起止章、是否卷末、下一弧是否待展开、是否需要新卷
 - `has_arc_review` / `has_arc_summary` / `has_volume_summary`
-- `foundation_missing`：规划期还缺的设定项
+- `foundation_missing`：规划期还缺的设定项。短篇缺 `outline.json`。进度标明分层，或已经有非空的 `layered_outline.json` 时，改查分层大纲和指南针，不再把扁平 `outline.json` 当成缺项
 - `planning_tier`
 - `has_global_review`：非分层书在审阅到期点，该章是否已有 `scope=global` 的审阅。分层书恒为假
 - `immediate_feedback_count`：必须在续写前处理的外部修订条数。写作者的普通反馈不在这里，留到下一次自然的结构操作
