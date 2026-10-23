@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { attachBook, bookHref, getLibrary, getModel, moveBook, pickDirectory, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
+import { attachBook, bookHref, emptyTrash, getLibrary, getModel, moveBook, pickDirectory, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
 import { blocks, deskState } from "./deskState.js"
 import {
   DEFAULT_MODEL,
@@ -89,6 +89,15 @@ export function Shelf() {
       setActionError(reason.message)
     }
   }
+
+  async function clearTrash() {
+    setActionError("")
+    try {
+      setLibrary(await emptyTrash())
+    } catch (reason) {
+      setActionError(reason.message)
+    }
+  }
   return (
     <main className="page">
       <header className="page-head">
@@ -162,6 +171,7 @@ export function Shelf() {
         onDragLeave={() => setBasketHot(false)}
         onDrop={dropInBasket}
         onRestore={restoreBook}
+        onEmpty={clearTrash}
       />
       </div>
       <div className="attach pick-row">
@@ -196,12 +206,11 @@ function spineWidth(book) {
   return 72 + Math.min(22, Math.round(chapters * 1.4))
 }
 
-function Wastebasket({ trash, hot, onDragOver, onDragLeave, onDrop, onRestore }) {
-  const slips = trash.slice(0, 3)
+function Wastebasket({ trash, hot, onDragOver, onDragLeave, onDrop, onRestore, onEmpty }) {
+  const [open, setOpen] = useState(false)
   return (
     <section
       className={hot ? "basket hot" : "basket"}
-      aria-label="废纸篓"
       onDragEnter={(event) => {
         event.preventDefault()
         onDragOver(event)
@@ -213,20 +222,35 @@ function Wastebasket({ trash, hot, onDragOver, onDragLeave, onDrop, onRestore })
       }}
       onDrop={onDrop}
     >
-      <div className="basket-body">
-        <div className="basket-slips">
-          {slips.map((book) => {
-            const title = book.title || folderName(book.directory)
-            return (
-              <button key={book.directory} type="button" onClick={() => onRestore(book.directory)} aria-label={`把《${title}》拣回书架`} title="拣回书架">
-                {title}
-              </button>
-            )
-          })}
+      <button
+        type="button"
+        className="basket-face"
+        aria-expanded={open}
+        aria-label={open ? "合上废纸篓" : "打开废纸篓"}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="basket-bin" aria-hidden="true" />
+        <span>废纸篓{trash.length ? ` · ${trash.length}` : ""}</span>
+      </button>
+      {open ? (
+        <div className="basket-sheet" role="dialog" aria-label="废纸篓">
+          {trash.length === 0 ? <p>篓里是空的。</p> : (
+            <ul>
+              {trash.map((book) => {
+                const title = book.title || folderName(book.directory)
+                return (
+                  <li key={book.directory}>
+                    <span>{title}</span>
+                    <button type="button" onClick={() => onRestore(book.directory)} aria-label={`把《${title}》拣回书架`}>拣回</button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          <button type="button" className="quiet" disabled={trash.length === 0} onClick={onEmpty}>清空废纸篓</button>
+          {trash.length > 0 ? <p>目录还留在磁盘上。</p> : null}
         </div>
-        <div className="basket-bin" aria-hidden="true" />
-      </div>
-      <p>废纸篓{trash.length ? ` · ${trash.length}` : ""}</p>
+      ) : null}
     </section>
   )
 }
@@ -534,38 +558,41 @@ export function DeskScreen({ directory }) {
   }
 
   return (
-    <main className="desk">
-      <div className="desk-body">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow"><a href="#/">书架</a></p>
-          <h1>{bookTitle(snapshot)}</h1>
-          <p className="path" title={snapshot.directory}>{shortPath(snapshot.directory)}</p>
-        </div>
+    <main className="page">
+      <header className="page-head">
+        <p className="eyebrow">
+          <a href="#/">书架</a>
+          <span title={snapshot.directory}> · {bookTitle(snapshot)}</span>
+        </p>
+        <h1>写作现场</h1>
+        <p className="lede">{view.sentence}</p>
       </header>
-      <div className="desk-tools">
       <BookSwitch directory={directory} current="/desk" importStatus={snapshot.import_status} />
-      <div className="topbar-meta">
-        {snapshot.running ? (
-          <span className="pill live">
-            <i aria-hidden="true" />
-            {phase || "正在写"}
-          </span>
-        ) : null}
-        {flow && flow !== phase ? <span className="pill">{flow}</span> : null}
-        <div className="mode" role="group" aria-label="推进方式">
-          <button type="button" aria-pressed={snapshot.advance_mode === "auto"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "auto" && act("review_off")}>自动推进</button>
-          <button type="button" aria-pressed={snapshot.advance_mode === "review"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "review" && act("review_on")}>逐章验收</button>
+      <div className="section-row desk-meta">
+        <div className="desk-pills">
+          {snapshot.running ? (
+            <span className="pill live">
+              <i aria-hidden="true" />
+              {phase || "正在写"}
+            </span>
+          ) : null}
+          {flow && flow !== phase ? <span className="pill">{flow}</span> : null}
         </div>
-        {snapshot.running && !blocks(view, "abort") ? (
-          <button type="button" className="quiet" onClick={() => act("abort")}>暂停</button>
-        ) : null}
+        <div className="desk-mode">
+          <div className="mode" role="group" aria-label="推进方式">
+            <button type="button" aria-pressed={snapshot.advance_mode === "auto"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "auto" && act("review_off")}>自动推进</button>
+            <button type="button" aria-pressed={snapshot.advance_mode === "review"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "review" && act("review_on")}>逐章验收</button>
+          </div>
+          {snapshot.running && !blocks(view, "abort") ? (
+            <button type="button" className="quiet" onClick={() => act("abort")}>暂停</button>
+          ) : null}
+        </div>
       </div>
-      </div>
+      <ProgressBoard snapshot={snapshot} />
       {snapshot.error && view.id !== "config" ? <p className="banner" role="status">{snapshot.error}</p> : null}
       {loadError ? <p className="banner" role="status">{loadError}</p> : null}
       <div className="desk-grid">
-        <section className="stage">
+        <section>
           <article className="sheet">
             {latestChapter?.title ? <h2 className="chapter-name">{latestChapter.title}</h2> : null}
             {view.id === "config" ? <p className="sheet-next"><a className="signal" href="#/model">接入模型</a></p> : null}
@@ -579,14 +606,46 @@ export function DeskScreen({ directory }) {
             </p>
           ) : null}
           {snapshot.events.length ? <EventList events={snapshot.events} /> : null}
+          <form
+            className="composer"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (view.primary === "steer") {
+                if (!steerOff && steerText.trim()) act("steer", { text: steerText })
+                return
+              }
+              if (view.primary === "resume") act("resume")
+              if (view.primary === "next") act("next")
+              if (view.primary === "import_confirm") act("import_confirm")
+            }}
+          >
+            <h2>干预</h2>
+            <label>
+              方向
+              <textarea
+                value={steerText}
+                readOnly={Boolean(pending) || blocks(view, "steer")}
+                onChange={(event) => setDraft(event.target.value)}
+                rows={3}
+                placeholder={blocks(view, "steer") ? "现在不能干预" : "写下要改的方向"}
+              />
+            </label>
+            <div className="composer-actions">
+              {view.primary === "steer" ? (
+                <button className="signal" type="submit" disabled={steerOff || !steerText.trim()}>{view.label}</button>
+              ) : null}
+              {view.primary && view.primary !== "steer" ? (
+                <button className="signal" type="submit" disabled={busy}>{view.label}</button>
+              ) : null}
+              {view.primary !== "steer" && !blocks(view, "steer") && steerText.trim() ? (
+                <button type="button" className="quiet" disabled={steerOff} onClick={() => act("steer", { text: steerText })}>发送干预</button>
+              ) : null}
+              {view.id === "empty" ? <a className="signal link-button" href={bookHref("/new", directory)}>去写需求</a> : null}
+            </div>
+          </form>
         </section>
-        <aside className="margin" aria-label="页边">
-          <p className="margin-next">
-            <span>下一章</span>
-            <strong>{snapshot.next_chapter || "—"}</strong>
-          </p>
-          <p className="margin-status">{view.sentence}</p>
-          <ProgressBoard snapshot={snapshot} />
+        <aside className="rail" aria-label="这本书">
+          <RailItem label="下一章" value={snapshot.next_chapter ? `第 ${snapshot.next_chapter} 章` : "还没有"} dim={!snapshot.next_chapter} />
           {snapshot.pending_rewrites.length ? (
             <RailItem
               label="返工队列"
@@ -609,43 +668,6 @@ export function DeskScreen({ directory }) {
           ) : null}
         </aside>
       </div>
-      </div>
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (view.primary === "steer") {
-            if (!steerOff && steerText.trim()) act("steer", { text: steerText })
-            return
-          }
-          if (view.primary === "resume") act("resume")
-          if (view.primary === "next") act("next")
-          if (view.primary === "import_confirm") act("import_confirm")
-        }}
-      >
-        <label>
-          干预
-          <textarea
-            value={steerText}
-            readOnly={Boolean(pending) || blocks(view, "steer")}
-            onChange={(event) => setDraft(event.target.value)}
-            rows={2}
-            placeholder={blocks(view, "steer") ? "现在不能干预" : "写下要改的方向"}
-          />
-        </label>
-        <div className="composer-actions">
-          {view.primary === "steer" ? (
-            <button className="signal" type="submit" disabled={steerOff || !steerText.trim()}>{view.label}</button>
-          ) : null}
-          {view.primary && view.primary !== "steer" ? (
-            <button className="signal" type="submit" disabled={busy}>{view.label}</button>
-          ) : null}
-          {view.primary !== "steer" && !blocks(view, "steer") && steerText.trim() ? (
-            <button type="button" className="quiet" disabled={steerOff} onClick={() => act("steer", { text: steerText })}>发送干预</button>
-          ) : null}
-          {view.id === "empty" ? <a className="signal link-button" href={bookHref("/new", directory)}>去写需求</a> : null}
-        </div>
-      </form>
     </main>
   )
 }

@@ -226,6 +226,14 @@ class Desk:
         self._write_catalog(directories, trash)
         return self.library()
 
+    def empty_trash(self) -> dict:
+        directories, trash = self._catalog()
+        for item in trash:
+            if self._busy(Path(item)):
+                raise DeskError("废纸篓里还有正在写或被占用的书，不能清空")
+        self._write_catalog(directories, [])
+        return self.library()
+
     def snapshot(self, directory: str) -> dict:
         root = self._existing_directory(directory)
         return self._snapshot(root)

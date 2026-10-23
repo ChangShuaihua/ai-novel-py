@@ -333,6 +333,12 @@ def test_discard_puts_a_book_in_the_wastebasket_without_deleting_files(tmp_path:
     assert restored["trash"] == []
     assert (root / "chapters" / "01.md").is_file()
 
+    desk.discard(str(root))
+    emptied = desk.empty_trash()
+    assert emptied["trash"] == []
+    assert [item["directory"] for item in emptied["books"]] == [str(other.resolve())]
+    assert (root / "chapters" / "01.md").is_file()
+
 
 def test_discard_refuses_a_locked_book(tmp_path: Path):
     root = tmp_path / "book"

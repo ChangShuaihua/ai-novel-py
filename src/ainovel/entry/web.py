@@ -73,6 +73,8 @@ def _handler(desk: Desk, static_dir: Path):
                         self._send(200, desk.discard(directory))
                     elif action == "restore":
                         self._send(200, desk.restore(directory))
+                    elif action == "empty":
+                        self._send(200, desk.empty_trash())
                     elif action == "attach":
                         self._send(200, desk.attach(directory))
                     else:

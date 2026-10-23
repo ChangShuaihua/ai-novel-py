@@ -50,6 +50,14 @@ export function moveBook(directory, action) {
   })
 }
 
+export function emptyTrash() {
+  return request("/api/library", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "empty" }),
+  })
+}
+
 export function getSnapshot(directory) {
   const query = new URLSearchParams({ directory })
   return request(`/api/snapshot?${query}`)
