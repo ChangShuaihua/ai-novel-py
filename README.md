@@ -2,7 +2,7 @@
 
 全自动长篇小说创作引擎。确定性引擎按书目录里的事实调度规划、写作和审阅；模型只在开放创作和少量语义裁定处被调用。从一句话需求写到完整小说，进程结束后从最近落盘的一步继续。
 
-阶段 1 到阶段 8 已落地，见 [实现顺序](docs/08-roadmap.md)。规格见 [文档](docs/01-architecture.md)。
+阶段 1 到阶段 8 已落地，见 [实现顺序](.cursor/docs/08-roadmap.md)。规格见 [文档](.cursor/docs/01-architecture.md)。
 
 ## 安装
 
@@ -128,19 +128,19 @@ python -m ainovel.entry.headless import books/demo novel.txt --yes
   meta/pending_commit.json
 ```
 
-分层书另有 `layered_outline.json` 和 `meta/compass.json`。完整清单见 [领域模型与书籍目录](docs/02-domain-store.md)。
+分层书另有 `layered_outline.json` 和 `meta/compass.json`。完整清单见 [领域模型与书籍目录](.cursor/docs/02-domain-store.md)。
 
 ## 文档
 
-1. [架构与铁律](docs/01-architecture.md)
-2. [领域模型与书籍目录](docs/02-domain-store.md)
-3. [工具契约](docs/03-tools.md)
-4. [路由与引擎循环](docs/04-flow-engine.md)
-5. [裁定与三个创作代理](docs/05-arbiter-workers.md)
-6. [上下文、文风与宿主](docs/06-context-host.md)
-7. [后置能力与测试](docs/07-later-and-tests.md)
-8. [实现顺序](docs/08-roadmap.md)
-9. [界面](docs/09-ui.md)
+1. [架构与铁律](.cursor/docs/01-architecture.md)
+2. [领域模型与书籍目录](.cursor/docs/02-domain-store.md)
+3. [工具契约](.cursor/docs/03-tools.md)
+4. [路由与引擎循环](.cursor/docs/04-flow-engine.md)
+5. [裁定与三个创作代理](.cursor/docs/05-arbiter-workers.md)
+6. [上下文、文风与宿主](.cursor/docs/06-context-host.md)
+7. [后置能力与测试](.cursor/docs/07-later-and-tests.md)
+8. [实现顺序](.cursor/docs/08-roadmap.md)
+9. [界面](.cursor/docs/09-ui.md)
 
 ## 写作控制室
 
