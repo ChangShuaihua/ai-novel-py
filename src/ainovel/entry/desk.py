@@ -17,7 +17,7 @@ from ainovel.llm.types import ModelRef
 from ainovel.host.snapshot import build_snapshot, has_progress, shelf_row
 from ainovel.importers.pipeline import ImportError, accept_segmentation, ingest, run
 from ainovel.listing import build_listing
-from ainovel.store.io import mark_writable
+from ainovel.store.io import atomic_replace
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ class Desk:
         self._picker = picker
         self._save_picker = save_picker
         self._guard = threading.Lock()
+        self._catalog_lock = threading.Lock()
         self._pick_guard = threading.Lock()
         self._active: Path | None = None
         self._host: Host | None = None
@@ -233,34 +234,40 @@ class Desk:
         root = self._existing_directory(directory)
         if self._busy(root):
             raise DeskError("这本书还在写或被占用，不能丢进废纸篓")
-        directories, trash = self._catalog()
         resolved = str(root)
-        if resolved not in directories:
-            raise DeskError("书架上没有这本书")
-        directories = [item for item in directories if item != resolved]
-        if resolved not in trash:
-            trash.insert(0, resolved)
-        self._write_catalog(directories, trash)
+
+        def mutate(directories: list[str], trash: list[str]) -> tuple[list[str], list[str]]:
+            if resolved not in directories:
+                raise DeskError("书架上没有这本书")
+            directories = [item for item in directories if item != resolved]
+            if resolved not in trash:
+                trash.insert(0, resolved)
+            return directories, trash
+
+        self._update_catalog(mutate)
         return self.library()
 
     def restore(self, directory: str) -> dict:
         root = self._existing_directory(directory)
-        directories, trash = self._catalog()
         resolved = str(root)
-        if resolved not in trash:
-            raise DeskError("废纸篓里没有这本书")
-        trash = [item for item in trash if item != resolved]
-        if resolved not in directories:
-            directories.append(resolved)
-        self._write_catalog(directories, trash)
+
+        def mutate(directories: list[str], trash: list[str]) -> tuple[list[str], list[str]]:
+            if resolved not in trash:
+                raise DeskError("废纸篓里没有这本书")
+            trash = [item for item in trash if item != resolved]
+            if resolved not in directories:
+                directories.append(resolved)
+            return directories, trash
+
+        self._update_catalog(mutate)
         return self.library()
 
     def empty_trash(self) -> dict:
-        directories, trash = self._catalog()
+        _, trash = self._catalog()
         for item in trash:
             if self._busy(Path(item)):
                 raise DeskError("废纸篓里还有正在写或被占用的书，不能清空")
-        self._write_catalog(directories, [])
+        self._update_catalog(lambda directories, _trash: (directories, []))
         return self.library()
 
     def snapshot(self, directory: str) -> dict:
@@ -466,8 +473,6 @@ class Desk:
             snap = self._snapshot(root)
             snap["error"] = _short(exc)
             return snap
-        finally:
-            self._restore_writable(root)
         with self._guard:
             self._reports[str(root)] = report
         return self._snapshot(root)
@@ -495,8 +500,6 @@ class Desk:
             snap = self._snapshot(root)
             snap["error"] = _short(exc)
             return snap
-        finally:
-            self._restore_writable(root)
         with self._guard:
             self._exported[str(root)] = str(written)
         return self._snapshot(root)
@@ -538,13 +541,6 @@ class Desk:
             self._active = None
         if host is not None:
             host.close()
-
-    def _restore_writable(self, root: Path) -> None:
-        with self._guard:
-            host = self._host if self._active == root else None
-            held = host is not None and host.lock.held
-        if held:
-            mark_writable(root)
 
     def _snapshot(self, root: Path) -> dict:
         with self._guard:
@@ -651,7 +647,7 @@ class Desk:
             from ainovel.store.book import Book
 
             try:
-                book = Book(root)
+                book = Book(root, readonly=True)
             except (OSError, ValueError):
                 return False
         try:
@@ -671,11 +667,16 @@ class Desk:
         return [Path(item) for item in self._catalog()[0]]
 
     def _catalog(self) -> tuple[list[str], list[str]]:
+        with self._catalog_lock:
+            return self._read_catalog()
+
+    def _read_catalog(self) -> tuple[list[str], list[str]]:
         if not self._library_path.is_file():
             return [], []
         try:
             payload = json.loads(self._library_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            logger.error("书架文件读不了，先显示空架：%s", self._library_path)
             return [], []
         if not isinstance(payload, dict):
             return [], []
@@ -697,18 +698,26 @@ class Desk:
         return found
 
     def _remember(self, root: Path) -> None:
-        directories, trash = self._catalog()
         resolved = str(root)
-        trash = [item for item in trash if item != resolved]
-        if resolved not in directories:
-            directories.append(resolved)
-        self._write_catalog(directories, trash)
+
+        def mutate(directories: list[str], trash: list[str]) -> tuple[list[str], list[str]]:
+            trash = [item for item in trash if item != resolved]
+            if resolved not in directories:
+                directories.append(resolved)
+            return directories, trash
+
+        self._update_catalog(mutate)
+
+    def _update_catalog(self, mutate) -> None:
+        with self._catalog_lock:
+            directories, trash = mutate(*self._read_catalog())
+            self._write_catalog(directories, trash)
 
     def _write_catalog(self, directories: list[str], trash: list[str]) -> None:
         self._library_path.parent.mkdir(parents=True, exist_ok=True)
-        self._library_path.write_text(
-            json.dumps({"directories": directories, "trash": trash}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        atomic_replace(
+            self._library_path,
+            (json.dumps({"directories": directories, "trash": trash}, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
         )
 
     def _allocate(self) -> Path:

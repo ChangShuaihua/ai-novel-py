@@ -86,13 +86,34 @@ def chapter_from_messages(messages: list[dict], book: Book) -> int:
     return progress.next_chapter()
 
 
+class ContextUsage:
+    """写作者最近一轮送进模型的占用。显示用，不参与调度。"""
+
+    def __init__(self) -> None:
+        self.text = ""
+
+
+def format_context_usage(used: int, budget: int) -> str:
+    if budget <= 0:
+        return ""
+    percent = round(used * 100 / budget)
+    if percent < 70:
+        band = "正常"
+    elif percent <= 85:
+        band = "警告"
+    else:
+        band = "危险"
+    return f"{percent}% · {band}"
+
+
 class WriterContext:
     """包在写作者补全器外面。窗口按字符数估算。"""
 
-    def __init__(self, inner, book: Book, budget: int) -> None:
+    def __init__(self, inner, book: Book, budget: int, usage: ContextUsage | None = None) -> None:
         self.inner = inner
         self.book = book
         self.budget = budget
+        self.usage = usage
         self._failed = False
 
     def complete(self, messages, tools):
@@ -127,6 +148,8 @@ class WriterContext:
             summarize=summarize,
         )
         messages[:] = compacted
+        if self.usage is not None:
+            self.usage.text = format_context_usage(_chars(compacted), self.budget)
         return self.inner.complete(messages, tools)
 
 

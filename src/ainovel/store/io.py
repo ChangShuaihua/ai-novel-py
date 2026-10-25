@@ -9,29 +9,19 @@ from typing import Any
 
 
 class ReadOnlyError(PermissionError):
-    """这本书是只读打开的。诊断和导出不能写回。"""
-
-
-_READONLY_ROOTS: set[str] = set()
-
-
-def mark_readonly(root: Path) -> None:
-    _READONLY_ROOTS.add(str(Path(root).resolve()))
-
-
-def mark_writable(root: Path) -> None:
-    _READONLY_ROOTS.discard(str(Path(root).resolve()))
+    """这份打开是只读的。诊断和导出不能写回。别的打开仍可写。"""
 
 
 class IO:
-    """一本书目录上的读写锁。子存储可以各持一份，锁不跨目录。"""
+    """一本书目录上的读写锁。只读只约束这一份，不挡住同一进程里的可写打开。"""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, readonly: bool = False) -> None:
         self.root = root
+        self.readonly = readonly
         self._lock = threading.RLock()
 
     def _refuse_when_readonly(self) -> None:
-        if str(self.root.resolve()) in _READONLY_ROOTS:
+        if self.readonly:
             raise ReadOnlyError(f"只读打开，拒绝写入 {self.root}")
 
     def exclusive(self) -> threading.RLock:

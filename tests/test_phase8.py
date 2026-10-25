@@ -67,6 +67,9 @@ def test_confirmed_split_survives_interruption(tmp_path: Path):
     assert (root / "meta" / "import" / "analyses" / "000001.json").read_bytes() == analysis
     assert (root / "chapters" / "01.md").is_file()
     assert (root / "chapters" / "02.md").is_file()
+    published = Book.open(root, writable=False)
+    meta = published.run_meta.load()
+    assert meta is not None and meta.advance_hold is None
 
 
 def test_txt_export_follows_completed_chapter_order(tmp_path: Path):
@@ -84,6 +87,18 @@ def test_txt_export_follows_completed_chapter_order(tmp_path: Path):
     text = dest.read_text(encoding="utf-8")
     assert text.index("第二章正文") < text.index("第一章正文")
     assert (root / "meta" / "progress.json").read_bytes() == before
+
+
+def test_diag_and_export_leave_a_live_book_writable(tmp_path: Path):
+    root = tmp_path / "book"
+    live = Book.open(root, writable=True)
+    live.progress.save(Progress(phase=Phase.WRITING, flow=FlowState.WRITING, total_chapters=1, completed_chapters=[1]))
+    (root / "chapters").mkdir()
+    (root / "chapters" / "01.md").write_text("第一章还在写。\n", encoding="utf-8")
+    assert main(["diag", str(root)]) == 0
+    export_txt(root, tmp_path / "out.txt")
+    live.progress.save(Progress(phase=Phase.WRITING, flow=FlowState.WRITING, total_chapters=1, completed_chapters=[1], current_chapter=1))
+    assert live.progress.load().current_chapter == 1
 
 
 def test_diag_opens_readonly(tmp_path: Path):

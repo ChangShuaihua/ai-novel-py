@@ -100,10 +100,10 @@ def test_logout_and_password_change_drop_old_tokens(tmp_path: Path):
 def studio(tmp_path: Path):
     auth = _store(tmp_path, attempts=3)
     accounts = Accounts(tmp_path)
-    static = tmp_path / "static"
-    static.mkdir()
-    (static / "index.html").write_text("<p>shelf</p>", encoding="utf-8")
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _handler(accounts, static, auth))
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _handler(accounts, auth, frozenset({"http://127.0.0.1:5173"})),
+    )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -143,13 +143,13 @@ def _cookie(set_cookie: str) -> str:
     return set_cookie.split(";", 1)[0]
 
 
-def test_api_requires_a_bearer_and_the_page_does_not(studio):
+def test_api_requires_a_bearer_and_does_not_serve_the_page(studio):
     status, payload, _ = _call(studio, "GET", "/api/library")
     assert status == 401
     assert "先登录" in payload.decode("utf-8")
     page, html, _ = _call(studio, "GET", "/")
-    assert page == 200
-    assert b"shelf" in html
+    assert page == 404
+    assert "没有这个接口" in html.decode("utf-8")
 
 
 def test_register_login_and_refresh_cookie(studio, tmp_path: Path):
@@ -231,6 +231,19 @@ def test_two_accounts_do_not_share_a_shelf(studio, tmp_path: Path):
     assert json.loads(own_body)["books"][0]["directory"] == str(book.resolve())
     assert other == 200
     assert json.loads(other_body)["books"] == []
+
+
+def test_configured_frontend_origin_can_register(studio):
+    status, payload, cookie = _call(
+        studio,
+        "POST",
+        "/api/register",
+        {"username": "夜里", "password": "correct-horse"},
+        origin="http://127.0.0.1:5173",
+    )
+    assert status == 200
+    assert "access_token" in payload.decode("utf-8")
+    assert "HttpOnly" in cookie
 
 
 def test_cross_site_register_is_rejected(studio):

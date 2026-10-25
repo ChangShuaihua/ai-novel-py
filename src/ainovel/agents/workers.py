@@ -2,7 +2,7 @@
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ainovel.agents.catalog import (
@@ -18,7 +18,7 @@ from ainovel.agents.catalog import (
 )
 from ainovel.agents.loop import AgentResult, run_agent
 from ainovel.llm.types import ToolSpec
-from ainovel.contextpack import WriterContext
+from ainovel.contextpack import ContextUsage, WriterContext
 from ainovel.store.book import Book
 from ainovel.tools import call_tool
 from ainovel.voice import Bundle, build_writer_prompt, load_bundle
@@ -43,6 +43,7 @@ class Worker:
     message_for: Callable[[str], str]
     prompt_cache_key: str
     max_turns: int
+    usage: ContextUsage = field(default_factory=ContextUsage)
 
     @property
     def tool_names(self) -> tuple[str, ...]:
@@ -50,7 +51,12 @@ class Worker:
 
     def run(self, completer, book: Book, task: str, *, max_turns: int | None = None, context_budget: int | None = None) -> AgentResult:
         if self.name == "writer":
-            completer = WriterContext(completer, book, _WRITER_BUDGET if context_budget is None else context_budget)
+            completer = WriterContext(
+                completer,
+                book,
+                _WRITER_BUDGET if context_budget is None else context_budget,
+                self.usage,
+            )
         return run_agent(
             completer,
             system_prompt=self.system_prompt,

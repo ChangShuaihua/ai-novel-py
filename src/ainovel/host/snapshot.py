@@ -135,8 +135,8 @@ def has_progress(root: Path | str) -> bool:
 
 
 def _view(root: Path) -> Book:
-    """只组装读取器，不改这本书在进程里的可写标记。"""
-    book = Book(root)
+    """只组装读取器。这一份是只读的，不挡住正在写的那一份。"""
+    book = Book(root, readonly=True)
     error = book.checkpoints.load_error()
     if error is not None:
         raise error

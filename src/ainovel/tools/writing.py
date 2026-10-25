@@ -10,8 +10,8 @@ from ainovel.store.book import Book
 from ainovel.tools.context import _chapter
 from ainovel.tools.errors import ToolArgsError, ToolConflict
 from ainovel.tools.files import (
-    append_jsonl,
     digest_text,
+    replace_chapter_rows,
     draft_path,
     final_path,
     find_checkpoint,
@@ -199,10 +199,13 @@ def _resume(book: Book, pending: PendingCommit) -> dict:
 def _apply_state(book: Book, pending: PendingCommit) -> None:
     write_text(book.root, final_path(pending.chapter), pending.draft_content)
     payload = pending.payload if isinstance(pending.payload, dict) else {}
-    append_jsonl(book.root, "timeline.jsonl", _tagged(payload.get("timeline"), pending.chapter))
-    append_jsonl(book.root, "meta/foreshadow.jsonl", _tagged(payload.get("foreshadow"), pending.chapter))
-    append_jsonl(book.root, "meta/relations.jsonl", _tagged(payload.get("relations"), pending.chapter))
-    append_jsonl(book.root, "meta/state_changes.jsonl", _tagged(payload.get("state_changes"), pending.chapter))
+    for relative, key in (
+        ("timeline.jsonl", "timeline"),
+        ("meta/foreshadow.jsonl", "foreshadow"),
+        ("meta/relations.jsonl", "relations"),
+        ("meta/state_changes.jsonl", "state_changes"),
+    ):
+        replace_chapter_rows(book.root, relative, pending.chapter, _tagged(payload.get(key), pending.chapter))
 
 
 def _mark_progress(book: Book, pending: PendingCommit) -> dict:
@@ -215,10 +218,8 @@ def _mark_progress(book: Book, pending: PendingCommit) -> dict:
     progress.total_word_count += words - previous
     progress.current_chapter = pending.chapter
     progress.in_progress_chapter = 0
-    if pending.dominant_strand:
-        progress.strand_history.append(pending.dominant_strand)
-    if pending.hook_type:
-        progress.hook_history.append(pending.hook_type)
+    _set_history(progress.strand_history, progress.completed_chapters, pending.chapter, pending.dominant_strand)
+    _set_history(progress.hook_history, progress.completed_chapters, pending.chapter, pending.hook_type)
     if pending.chapter in progress.pending_rewrites:
         progress.pending_rewrites = [item for item in progress.pending_rewrites if item != pending.chapter]
         progress.flow = progress.flow if progress.pending_rewrites else FlowState.WRITING
@@ -257,6 +258,19 @@ def _result_from_pending(book: Book, pending: PendingCommit, progress: Progress 
 
     index_for(book).upsert(book, pending.chapter, pending.draft_content)
     return result
+
+
+def _set_history(history: list[str], completed: list[int], chapter: int, value: str) -> None:
+    """一章一个位置。返工和提交重放都改这一格，不在末尾再加一条。"""
+    if not value or chapter not in completed:
+        return
+    index = completed.index(chapter)
+    if index < len(history):
+        history[index] = value
+        return
+    if index > len(history):
+        history.extend([""] * (index - len(history)))
+    history.append(value)
 
 
 def _require_commit_target(progress: Progress, chapter: int) -> None:

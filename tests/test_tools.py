@@ -53,6 +53,84 @@ def test_commit_happy_path_and_stable_replay(tmp_path: Path):
     assert (tmp_path / "chapters" / "01.md").read_text(encoding="utf-8") == "林舟推开门。"
 
 
+def test_rewrite_replaces_chapter_facts_without_duplicating(tmp_path: Path):
+    book = _book(tmp_path)
+    _commit(book, 1, "甲章", event="旧事", strand="quest", hook="question")
+    _commit(book, 2, "乙章", event="后事", strand="intrigue", hook="danger")
+    progress = book.progress.load()
+    assert progress is not None
+    progress.pending_rewrites = [1]
+    progress.flow = FlowState.REWRITING
+    book.progress.save(progress)
+    call_tool(book, "edit_chapter", {"chapter": 1, "content": "甲章改过"})
+    call_tool(book, "check_consistency", {"chapter": 1})
+    call_tool(
+        book,
+        "commit_chapter",
+        {
+            "chapter": 1,
+            "summary": "改过",
+            "timeline": [{"event": "新事"}],
+            "dominant_strand": "bond",
+            "hook_type": "image",
+        },
+    )
+    events = [json.loads(line)["event"] for line in (tmp_path / "timeline.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert events == ["新事", "后事"]
+    progress = book.progress.load()
+    assert progress is not None
+    assert progress.strand_history == ["bond", "intrigue"]
+    assert progress.hook_history == ["image", "danger"]
+
+    (tmp_path / "timeline.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"chapter": 1, "event": "新事"}, ensure_ascii=False),
+                json.dumps({"chapter": 1, "event": "新事"}, ensure_ascii=False),
+                json.dumps({"chapter": 2, "event": "后事"}, ensure_ascii=False),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    book.pending.save(
+        PendingCommit(
+            chapter=1,
+            stage=CommitStage.STARTED,
+            payload={"chapter": 1, "summary": "改过", "timeline": [{"event": "新事"}]},
+            draft_content="甲章改过",
+            summary="改过",
+            dominant_strand="bond",
+            hook_type="image",
+            rewrite=True,
+        )
+    )
+    call_tool(book, "commit_chapter", {"chapter": 1, "summary": "不该再记一条"})
+    events = [json.loads(line)["event"] for line in (tmp_path / "timeline.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert events == ["新事", "后事"]
+    progress = book.progress.load()
+    assert progress is not None
+    assert progress.strand_history == ["bond", "intrigue"]
+    assert progress.hook_history == ["image", "danger"]
+
+
+def _commit(book: Book, chapter: int, text: str, *, event: str, strand: str, hook: str) -> None:
+    call_tool(book, "plan_chapter", {"chapter": chapter, "goal": event})
+    call_tool(book, "draft_chapter", {"chapter": chapter, "content": text})
+    call_tool(book, "check_consistency", {"chapter": chapter})
+    call_tool(
+        book,
+        "commit_chapter",
+        {
+            "chapter": chapter,
+            "summary": event,
+            "timeline": [{"event": event}],
+            "dominant_strand": strand,
+            "hook_type": hook,
+        },
+    )
+
+
 def test_pending_commit_resumes_from_each_stage_and_ignores_new_text(tmp_path: Path):
     book = _book(tmp_path)
     call_tool(book, "plan_chapter", {"chapter": 1, "goal": "进门"})

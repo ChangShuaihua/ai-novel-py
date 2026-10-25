@@ -52,7 +52,7 @@ flowchart TD
 ainovel/
   domain/ store/ flow/ tools/ arbiter/ agents/ host/ entry/ llm/
   assets/prompts/ assets/references/ assets/styles/ assets/voice.md
-  static/    web 构建结果，源码在仓库根的 web/
+  web/      独立前端，开发时单独打开，接口在 entry/web.py
 ```
 
 ## 四条铁律

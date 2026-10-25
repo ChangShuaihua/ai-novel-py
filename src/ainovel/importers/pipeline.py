@@ -171,7 +171,6 @@ def _synthesize(root: Path, completer) -> None:
 def _publish(root: Path) -> None:
     """发布是唯一写正式章节目录的步骤。已有相同正文的章节不重写。"""
     from ainovel.domain.progress import Progress
-    from ainovel.domain.run_meta import AdvanceHold
     from ainovel.domain.transitions import FlowState, Phase
     from ainovel.store.book import Book
     from ainovel.store.paths import chapter_number
@@ -197,10 +196,8 @@ def _publish(root: Path) -> None:
     progress.total_chapters = max(progress.total_chapters, len(numbers))
     progress.current_chapter = max(numbers)
     book.progress.save(progress)
-    meta = book.run_meta.load() or book.run_meta.init(style="", provider="", model="")
-    if not _auto_continue(root) and meta.advance_hold is None:
-        meta.advance_hold = AdvanceHold(after="boundary", reason="导入完成，等待用户继续")
-        book.run_meta.save(meta)
+    if book.run_meta.load() is None:
+        book.run_meta.init(style="", provider="", model="")
 
 
 def _published(root: Path, chapters: list[dict]) -> bool:
@@ -264,11 +261,6 @@ def _segmentation(root: Path) -> dict:
 def _auto_confirm(root: Path) -> bool:
     intent = _load(root / "meta" / "import" / "intent.json") or {}
     return bool(intent.get("auto_confirm"))
-
-
-def _auto_continue(root: Path) -> bool:
-    intent = _load(root / "meta" / "import" / "intent.json") or {}
-    return bool(intent.get("continue_after_import"))
 
 
 def _write_artifact(path: Path, digest: str, payload: dict) -> None:

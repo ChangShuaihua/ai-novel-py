@@ -63,6 +63,44 @@ def append_jsonl(root: Path, relative: str, rows: list) -> None:
     IO(root).append_line(relative, blob)
 
 
+def replace_chapter_rows(root: Path, relative: str, chapter: int, rows: list) -> None:
+    """用这一章的新行换掉旧行。重放和返工都得到同一份结果。"""
+    text = read_text(root, relative)
+    kept: list[str] = []
+    placed = False
+    fresh = [json.dumps(row, ensure_ascii=False) for row in rows if isinstance(row, dict)]
+    if text:
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                kept.append(line)
+                continue
+            if isinstance(item, dict) and _row_chapter(item) == chapter:
+                if not placed:
+                    kept.extend(fresh)
+                    placed = True
+                continue
+            kept.append(line)
+    if not placed:
+        kept.extend(fresh)
+    if text is None and not fresh:
+        return
+    body = "\n".join(kept)
+    if body:
+        body += "\n"
+    IO(root).write_bytes(relative, body.encode("utf-8"))
+
+
+def _row_chapter(item: dict) -> int:
+    try:
+        return int(item.get("chapter") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def find_checkpoint(book: Book, scope: Scope, step: str, digest: str):
     if not digest:
         return None

@@ -47,6 +47,7 @@ class Engine:
         self.defer_gate = False
         self.gate = ChapterAdvanceGate(book, self._pause)
         self.latest_instruction: Instruction | None = None
+        self.context_usage = ""
         self._yield = False
 
     def enqueue(self, instruction: Instruction) -> None:
@@ -94,10 +95,12 @@ class Engine:
                 self._pause(f"未知代理 {instruction.agent}，已暂停")
                 break
             except (CheckpointGuardError, AgentLoopError, ArbiterError) as exc:
+                self._capture_context(instruction.agent)
                 self._remember_failure(instruction, exc)
                 if self._handle_worker_error(instruction, exc):
                     break
             else:
+                self._capture_context(instruction.agent)
                 self._failed_key = ""
             rounds += 1
         return self.settle()
@@ -263,6 +266,13 @@ class Engine:
                 "error": error,
             }
         )
+
+    def _capture_context(self, agent: str) -> None:
+        worker = self.workers.get(agent)
+        usage = getattr(worker, "usage", None) if worker is not None else None
+        text = str(getattr(usage, "text", "") or "")
+        if text:
+            self.context_usage = text
 
     def _pause(self, reason: str) -> None:
         self.paused = True

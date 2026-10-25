@@ -24,7 +24,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ainovel = ["assets/**/*.md", "static/**/*"]
+ainovel = ["assets/**/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

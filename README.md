@@ -146,14 +146,20 @@ python -m ainovel.entry.headless import books/demo novel.txt --yes
 
 界面只读宿主快照，按钮对应已有的启动、继续、干预、暂停、逐章验收、导入确认、导出和诊断。
 
+页面和接口分开跑。接口只回答 `/api`，不托管页面。
+
 ```bash
-cd web
-npm install
-npm run build
-cd ..
 python -m ainovel.entry.headless web
 ```
 
-`npm run build` 把页面写进包内 `src/ainovel/static/`，控制室从安装包读取。浏览器打开 <http://127.0.0.1:8765>，先登记或登录再进自己的书架。账号写在 `~/.ainovel/users.json`，密码只存散列。登录发出一对 JWT：访问令牌大约 15 分钟，放在内存里，请求带 `Authorization: Bearer`；刷新令牌大约 7 天，放在 HttpOnly cookie 里，也写在登录响应中。访问令牌过期后用刷新令牌换一对新的，旧的刷新令牌立即作废。改密码或离开会使已发出的令牌失效。每个人的书架和模型配置在 `~/.ainovel/accounts/` 下分开。命令行的 `start`、`resume` 仍由本机直接执行，不经过这道登录。
+另开一个终端：
 
-改界面时可以另开 `npm run dev`，页面在 <http://127.0.0.1:5173>，接口仍由上面的命令提供。
+```bash
+cd web
+npm install
+npm run dev
+```
+
+接口在 <http://127.0.0.1:8765>，页面在 <http://127.0.0.1:5173>。地址写在根目录 `.env` 和 `web/.env`，样例是 `.env.example`、`web/.env.example`。两边都用 `127.0.0.1`，刷新令牌的 cookie 才能带上。先登记或登录再进自己的书架。账号写在 `~/.ainovel/users.json`，密码只存散列。登录发出一对 JWT：访问令牌大约 15 分钟，放在内存里，请求带 `Authorization: Bearer`；刷新令牌大约 7 天，放在 HttpOnly cookie 里，也写在登录响应中。访问令牌过期后用刷新令牌换一对新的，旧的刷新令牌立即作废。改密码或离开会使已发出的令牌失效。每个人的书架和模型配置在 `~/.ainovel/accounts/` 下分开。命令行的 `start`、`resume` 仍由本机直接执行，不经过这道登录。
+
+`npm run build` 把页面写到 `web/dist`，由前端自己的静态服务托管，不放进 Python 包。

@@ -4,6 +4,12 @@ let accessToken = ""
 let currentName = ""
 let refreshing = null
 
+const API_BASE = String(import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765").replace(/\/$/, "")
+
+function api(path) {
+  return `${API_BASE}${path}`
+}
+
 export function currentUsername() {
   return currentName
 }
@@ -28,8 +34,9 @@ async function readJson(response) {
 
 export function refreshAccess() {
   if (!refreshing) {
-    refreshing = fetch("/api/refresh", {
+    refreshing = fetch(api("/api/refresh"), {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: "{}",
     })
@@ -53,7 +60,7 @@ async function request(url, options = {}, allowRefresh = true) {
   const { quietAuth, ...rest } = options
   const headers = { ...(rest.headers || {}) }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
-  let response = await fetch(url, { ...rest, headers })
+  let response = await fetch(api(url), { ...rest, credentials: "include", headers })
   if (response.status === 401 && allowRefresh && !quietAuth) {
     const renewed = await refreshAccess()
     if (renewed) return request(url, options, false)

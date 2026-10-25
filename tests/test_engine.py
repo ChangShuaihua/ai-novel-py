@@ -249,6 +249,24 @@ def test_missing_config_points_at_ainovel_home(tmp_path: Path, monkeypatch, caps
     assert ".ainovel" in captured.err
 
 
+def test_engine_records_writer_context_usage(tmp_path: Path):
+    book = Book.open(tmp_path / "book", writable=True)
+    book.progress.save(Progress(phase=Phase.COMPLETE))
+
+    class Writer:
+        def __init__(self) -> None:
+            self.usage = type("Usage", (), {"text": "42% · 正常"})()
+
+        def run(self, completer, book, task):
+            return None
+
+    engine = Engine(book, {"writer": Writer()}, object(), {})
+    engine._capture_context("writer")
+    assert engine.context_usage == "42% · 正常"
+    engine._capture_context("editor")
+    assert engine.context_usage == "42% · 正常"
+
+
 def test_failed_steer_keeps_pending_text(tmp_path: Path):
     root = tmp_path / "book"
     class Broken:

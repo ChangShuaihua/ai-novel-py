@@ -36,13 +36,12 @@ export function Shelf({ onLeave }) {
   const [picking, setPicking] = useState(false)
   const [loadError, setLoadError] = useState("")
   const [actionError, setActionError] = useState("")
-  const [basketHot, setBasketHot] = useState(false)
   const [view, setView] = useState("all")
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const [stars, setStars] = useState(readStars)
   const [accountOpen, setAccountOpen] = useState(false)
-  const dragged = useRef(false)
+  const [menuDir, setMenuDir] = useState(null)
 
   useEffect(() => {
     if (!accountOpen) return undefined
@@ -110,17 +109,26 @@ export function Shelf({ onLeave }) {
     })
   }
 
-  function dragBook(event, directory) {
-    dragged.current = false
-    event.dataTransfer.setData("text/plain", directory)
-    event.dataTransfer.effectAllowed = "move"
-  }
+  useEffect(() => {
+    if (!menuDir) return undefined
+    function onPointer(event) {
+      const node = event.target.closest?.("[data-book]")
+      if (node && node.getAttribute("data-book") === menuDir) return
+      setMenuDir(null)
+    }
+    function onKey(event) {
+      if (event.key === "Escape") setMenuDir(null)
+    }
+    window.addEventListener("pointerdown", onPointer)
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("pointerdown", onPointer)
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [menuDir])
 
-  async function dropInBasket(event) {
-    event.preventDefault()
-    setBasketHot(false)
-    const directory = event.dataTransfer.getData("text/plain")
-    if (!directory) return
+  async function discardBook(directory) {
+    setMenuDir(null)
     setActionError("")
     try {
       setLibrary(await moveBook(directory, "discard"))
@@ -153,7 +161,7 @@ export function Shelf({ onLeave }) {
       : view === "done"
         ? ["还没有完本", "写完的书会出现在这里"]
         : view === "stars"
-          ? ["还没有收藏", "书脊上的星，可以把一本书留在这里"]
+          ? ["还没有收藏", "点书上的按钮，选择收藏"]
           : ["没有符合的书", "换一个字，或回到我的书架"]
 
   return (
@@ -219,14 +227,6 @@ export function Shelf({ onLeave }) {
             ))}
             <Wastebasket
               trash={trash}
-              hot={basketHot}
-              onDragOver={(event) => {
-                event.preventDefault()
-                event.dataTransfer.dropEffect = "move"
-                setBasketHot(true)
-              }}
-              onDragLeave={() => setBasketHot(false)}
-              onDrop={dropInBasket}
               onRestore={restoreBook}
               onEmpty={clearTrash}
             />
@@ -253,24 +253,13 @@ export function Shelf({ onLeave }) {
                     const count = known ? `${book.completed_count}/${book.total_chapters}` : String(book.completed_count)
                     const starred = stars.includes(book.directory)
                     return (
-                      <li key={book.directory}>
+                      <li key={book.directory} className="hall-book" data-book={book.directory}>
                         <a
                           className={book.locked ? "volume held" : "volume"}
                           data-cloth={cloths[index]}
                           href={href}
                           title={book.directory}
-                          draggable
                           style={{ width: spineWidth(book) }}
-                          onDragStart={(event) => dragBook(event, book.directory)}
-                          onDragEnd={() => {
-                            dragged.current = true
-                            window.setTimeout(() => { dragged.current = false }, 0)
-                          }}
-                          onClick={(event) => {
-                            if (!dragged.current) return
-                            event.preventDefault()
-                            dragged.current = false
-                          }}
                         >
                           <span className="spine">
                             {known ? <span className="ribbon" style={{ height: `${pct}%` }} aria-hidden="true" /> : null}
@@ -280,18 +269,32 @@ export function Shelf({ onLeave }) {
                               <span>{count}{book.locked ? " · 占" : ""}</span>
                             </span>
                           </span>
-                          <button
-                            type="button"
-                            className={starred ? "hall-star on" : "hall-star"}
-                            aria-label={starred ? `取消收藏《${title}》` : `收藏《${title}》`}
-                            aria-pressed={starred}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              toggleStar(book.directory)
-                            }}
-                          >★</button>
                         </a>
+                        <button
+                          type="button"
+                          className={starred ? "hall-book-menu-btn on" : "hall-book-menu-btn"}
+                          aria-expanded={menuDir === book.directory}
+                          aria-label={starred ? `《${title}》已收藏，打开收藏和废纸篓` : `打开《${title}》的收藏和废纸篓`}
+                          onClick={() => setMenuDir((current) => current === book.directory ? null : book.directory)}
+                        >{starred ? "★" : "⋮"}</button>
+                        {menuDir === book.directory ? (
+                          <div className="hall-book-menu" role="menu">
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                toggleStar(book.directory)
+                                setMenuDir(null)
+                              }}
+                            >{starred ? "取消收藏" : "收藏"}</button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="danger"
+                              onClick={() => discardBook(book.directory)}
+                            >放进废纸篓</button>
+                          </div>
+                        ) : null}
                       </li>
                     )
                   })}
@@ -424,22 +427,27 @@ function spineWidth(book) {
   return 72 + Math.min(22, Math.round(chapters * 1.4))
 }
 
-function Wastebasket({ trash, hot, onDragOver, onDragLeave, onDrop, onRestore, onEmpty }) {
+function Wastebasket({ trash, onRestore, onEmpty }) {
   const [open, setOpen] = useState(false)
+  const root = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    function onPointer(event) {
+      if (root.current && root.current.contains(event.target)) return
+      setOpen(false)
+    }
+    function onKey(event) {
+      if (event.key === "Escape") setOpen(false)
+    }
+    window.addEventListener("pointerdown", onPointer)
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("pointerdown", onPointer)
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [open])
   return (
-    <section
-      className={hot ? "basket hot" : "basket"}
-      onDragEnter={(event) => {
-        event.preventDefault()
-        onDragOver(event)
-      }}
-      onDragOver={onDragOver}
-      onDragLeave={(event) => {
-        if (event.currentTarget.contains(event.relatedTarget)) return
-        onDragLeave()
-      }}
-      onDrop={onDrop}
-    >
+    <section ref={root} className="basket">
       <button
         type="button"
         className="basket-face"
@@ -452,6 +460,10 @@ function Wastebasket({ trash, hot, onDragOver, onDragLeave, onDrop, onRestore, o
       </button>
       {open ? (
         <div className="basket-sheet" role="dialog" aria-label="废纸篓">
+          <div className="basket-sheet-head">
+            <strong>废纸篓</strong>
+            <button type="button" onClick={() => setOpen(false)}>关闭</button>
+          </div>
           {trash.length === 0 ? <p>篓里是空的。</p> : (
             <ul>
               {trash.map((book) => {

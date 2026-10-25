@@ -1,4 +1,3 @@
-from ainovel.entry.web import _dist_dir
 from ainovel.resources import package_dir
 from ainovel.voice import assets_root, load_bundle
 
@@ -10,7 +9,5 @@ def test_assets_and_static_come_from_the_package():
     assert (package / "__init__.py").is_file()
     assert (root / "voice.md").is_file()
     assert (root / "prompts" / "writer.md").is_file()
-    assert _dist_dir() == package_dir("static")
-    assert _dist_dir().parent == package
     bundle = load_bundle(include_home=False)
     assert "{{VOICE}}" in bundle.prompts["writer.md"]

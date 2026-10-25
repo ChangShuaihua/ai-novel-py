@@ -1,14 +1,18 @@
 """无界面入口。缺配置时直接失败，并指向用户目录。"""
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+from ainovel.entry.envfile import load_env
 
 from ainovel.host.config import ConfigError
 from ainovel.host.host import Host, HostError
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ainovel")
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -52,8 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     tui.add_argument("directory")
 
     web = commands.add_parser("web")
-    web.add_argument("--host", default="127.0.0.1")
-    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--host", default=os.environ.get("AINOVEL_HOST", "127.0.0.1"))
+    web.add_argument("--port", type=int, default=int(os.environ.get("AINOVEL_PORT", "8765")))
 
     import_book = commands.add_parser("import")
     import_book.add_argument("directory")

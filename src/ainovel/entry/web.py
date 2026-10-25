@@ -1,21 +1,17 @@
-"""本机写作控制室。只把宿主快照和意图送进浏览器。"""
+"""写作接口。页面由单独的前端提供，这里只回答 /api。"""
 
 import json
 import logging
-import mimetypes
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from ainovel.entry.auth import AuthError, AuthStore, Tokens, read_cookie
 from ainovel.entry.desk import Desk, DeskError
-from ainovel.resources import package_dir
 
 logger = logging.getLogger(__name__)
-mimetypes.add_type("application/javascript", ".js")
-mimetypes.add_type("text/css", ".css")
-mimetypes.add_type("image/svg+xml", ".svg")
 
 _MAX_BODY = 1_000_000
 
@@ -53,15 +49,17 @@ class Accounts:
 def serve(
     host: str = "127.0.0.1",
     port: int = 8765,
-    static_dir: Path | None = None,
     auth: AuthStore | None = None,
     accounts: Accounts | None = None,
+    origins: frozenset[str] | None = None,
 ) -> None:
     door = auth or AuthStore()
     shelf = accounts or Accounts(door.root)
-    root = Path(static_dir) if static_dir is not None else _dist_dir()
-    server = ThreadingHTTPServer((host, port), _handler(shelf, root, door))
-    print(f"写作控制室 http://{host}:{port}", flush=True)
+    allowed = origins if origins is not None else cors_origins()
+    server = ThreadingHTTPServer((host, port), _handler(shelf, door, allowed))
+    print(f"写作接口 http://{host}:{port}", flush=True)
+    if allowed:
+        print("允许的页面来源 " + ", ".join(sorted(allowed)), flush=True)
     try:
         server.serve_forever()
     finally:
@@ -69,21 +67,27 @@ def serve(
         server.server_close()
 
 
-def _dist_dir() -> Path:
-    return package_dir("static")
+def cors_origins() -> frozenset[str]:
+    raw = os.environ.get("AINOVEL_CORS_ORIGINS", "http://127.0.0.1:5173")
+    return frozenset(item.strip().rstrip("/") for item in raw.split(",") if item.strip())
 
 
-def _handler(accounts: Accounts, static_dir: Path, auth: AuthStore):
+def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None = None):
+    allowed = origins or frozenset()
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_OPTIONS(self) -> None:
-            self._bytes(204, "text/plain; charset=utf-8", b"", cache=False)
+            if not self._guard():
+                self._send(403, {"error": "拒绝跨站请求。"})
+                return
+            self._bytes(204, "text/plain; charset=utf-8", b"", cache=False, preflight=True)
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path.startswith("/api/"):
-                if not self._same_origin():
+                if not self._guard():
                     self._send(403, {"error": "拒绝跨站请求。"})
                     return
                 if parsed.path == "/api/session":
@@ -108,11 +112,11 @@ def _handler(accounts: Accounts, static_dir: Path, auth: AuthStore):
                     return
                 self._send(404, {"error": "没有这个接口"})
                 return
-            self._file(parsed.path)
+            self._send(404, {"error": "没有这个接口"})
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
-            if not self._same_origin():
+            if not self._guard():
                 self._drain()
                 self._send(403, {"error": "拒绝跨站请求。"})
                 return
@@ -302,10 +306,17 @@ def _handler(accounts: Accounts, static_dir: Path, auth: AuthStore):
                 return ""
             return token.strip()
 
-        def _same_origin(self) -> bool:
+        def _guard(self) -> bool:
+            self._cors_origin = ""
             origin = self.headers.get("Origin")
             if origin:
-                return urlparse(origin).netloc == (self.headers.get("Host") or "")
+                cleaned = origin.strip().rstrip("/")
+                parsed = urlparse(cleaned)
+                same_host = parsed.netloc == (self.headers.get("Host") or "")
+                if parsed.scheme in {"http", "https"} and (cleaned in allowed or same_host):
+                    self._cors_origin = cleaned
+                    return True
+                return False
             return self.headers.get("Sec-Fetch-Site") != "cross-site"
 
         def _drain(self) -> None:
@@ -330,31 +341,33 @@ def _handler(accounts: Accounts, static_dir: Path, auth: AuthStore):
                 raise DeskError("请求必须是对象")
             return payload
 
-        def _file(self, path: str) -> None:
-            if path.startswith("/api/"):
-                self._send(404, {"error": "没有这个接口"})
-                return
-            target = _safe_file(static_dir, path)
-            if target is None or not target.is_file():
-                target = static_dir / "index.html"
-            if not target.is_file():
-                body = _missing_page().encode("utf-8")
-                self._bytes(200, "text/html; charset=utf-8", body)
-                return
-            mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-            if mime.startswith("text/") or mime in {"application/javascript", "application/json"}:
-                mime += "; charset=utf-8"
-            self._bytes(200, mime, target.read_bytes(), cache=target.suffix != ".html")
-
         def _send(self, status: int, payload: dict, cookies: tuple[str, ...] = ()) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self._bytes(status, "application/json; charset=utf-8", body, cache=False, cookies=cookies)
 
-        def _bytes(self, status: int, content_type: str, body: bytes, *, cache: bool = True, cookies: tuple[str, ...] = ()) -> None:
+        def _bytes(
+            self,
+            status: int,
+            content_type: str,
+            body: bytes,
+            *,
+            cache: bool = True,
+            cookies: tuple[str, ...] = (),
+            preflight: bool = False,
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store" if not cache else "public, max-age=3600")
+            origin = getattr(self, "_cors_origin", "")
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Access-Control-Allow-Credentials", "true")
+                self.send_header("Vary", "Origin")
+            if preflight:
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                self.send_header("Access-Control-Max-Age", "600")
             for cookie in cookies:
                 self.send_header("Set-Cookie", cookie)
             self.end_headers()
@@ -362,28 +375,6 @@ def _handler(accounts: Accounts, static_dir: Path, auth: AuthStore):
                 self.wfile.write(body)
 
     return Handler
-
-
-def _safe_file(root: Path, path: str) -> Path | None:
-    if not root.is_dir():
-        return None
-    relative = unquote(path).lstrip("/")
-    if not relative:
-        return root / "index.html"
-    candidate = (root / relative).resolve()
-    try:
-        candidate.relative_to(root.resolve())
-    except ValueError:
-        return None
-    return candidate
-
-
-def _missing_page() -> str:
-    return """<!DOCTYPE html>
-<meta charset="utf-8">
-<title>ainovel</title>
-<p>界面还没有构建。在 web 目录执行 npm install，然后 npm run build。</p>
-"""
 
 
 def _short(exc: BaseException) -> str:

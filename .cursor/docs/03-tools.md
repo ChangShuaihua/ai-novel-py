@@ -94,7 +94,7 @@
 推进顺序：
 
 1. `started`：冻结意图和正文快照。
-2. `state_applied`：正文写入 `chapters/NN.md`，并追加时间线、伏笔、关系、状态变化。
+2. `state_applied`：正文写入 `chapters/NN.md`，并按章替换时间线、伏笔、关系、状态变化。同一章重放或返工只保留这一次的行。
 3. `progress_marked`：更新已完成列表、字数、流程、卷弧游标；返工则移出队首。
 4. `signal_saved`：写检查点 `commit` 和 `meta/last_commit.json`。
 5. 清除 `pending_commit`。

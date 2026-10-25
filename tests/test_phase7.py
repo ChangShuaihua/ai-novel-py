@@ -17,6 +17,7 @@ from ainovel.host.host import Host
 from ainovel.llm.types import Completion
 from ainovel.store.book import Book
 from ainovel.store.paths import chapter_number
+from ainovel.contextpack import ContextUsage, WriterContext, format_context_usage
 from ainovel.tools.context import novel_context
 
 
@@ -203,6 +204,22 @@ def test_steer_rules_survive_reopen(tmp_path: Path):
     reopened = Book.open(root, writable=False)
     again = novel_context(reopened, {})
     assert "不要写上帝视角" in again["user_rules"]["preferences"]
+
+
+def test_writer_context_usage_uses_character_budget(tmp_path: Path):
+    assert format_context_usage(69, 100) == "69% · 正常"
+    assert format_context_usage(70, 100) == "70% · 警告"
+    assert format_context_usage(85, 100) == "85% · 警告"
+    assert format_context_usage(86, 100) == "86% · 危险"
+
+    class Inner:
+        def complete(self, messages, tools):
+            return Completion(content="好")
+
+    usage = ContextUsage()
+    book = Book.open(tmp_path, writable=True)
+    WriterContext(Inner(), book, 100, usage).complete([{"role": "user", "content": "字" * 80}], [])
+    assert usage.text.endswith("警告") or usage.text.endswith("危险")
 
 
 def test_review_command_switches_mode(tmp_path: Path, monkeypatch):
