@@ -52,7 +52,7 @@
 路径：
 
 ```text
-本书 <书目录>/style/    优先于    全局 ~/.ainovel/style/    优先于    内置 assets/
+本书 <书目录>/style/    优先于    全局 ~/.ainovel/style/    优先于    包内 ainovel/assets/
 ```
 
 本书级绑定这本书的目录，不绑定进程的当前工作目录。需要机械保证的禁用词、疲劳词、字数，走规则层，在提交时检查，并出现在 `commit_chapter` 的 `rule_violations` 里。

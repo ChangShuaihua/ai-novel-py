@@ -93,14 +93,14 @@ reason     非空
 
 ## 提示词资产
 
-提示词放在 `assets/`，文件名固定：
+提示词放在包内 `ainovel/assets/`，文件名固定：
 
 ```text
-assets/prompts/   architect-short.md、architect-long.md、writer.md、editor.md
-                  arbiter-plan-start.md、arbiter-intervention.md、arbiter-failure.md
-assets/voice.md
-assets/styles/    default、fantasy、romance、suspense
-assets/references/ 写作参考、体裁模板、去 AI 腔
+src/ainovel/assets/prompts/   architect-short.md、architect-long.md、writer.md、editor.md
+                              arbiter-plan-start.md、arbiter-intervention.md、arbiter-failure.md
+src/ainovel/assets/voice.md
+src/ainovel/assets/styles/    default、fantasy、romance、suspense
+src/ainovel/assets/references/ 写作参考、体裁模板、去 AI 腔
 ```
 
 导入和仿写提示词留到后置阶段，不进第一轮装配。

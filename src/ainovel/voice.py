@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ainovel.resources import package_dir
+
 _PLACEHOLDER = "{{VOICE}}"
 _STYLE_NAME = re.compile(r"^[a-z0-9-]+$")
 _PROMPT_FILES = (
@@ -28,7 +30,7 @@ class Bundle:
 
 
 def assets_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "assets"
+    return package_dir("assets")
 
 
 def build_writer_prompt(protocol: str, voice: str, style: str = "") -> str:

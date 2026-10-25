@@ -85,9 +85,14 @@ def main(argv: list[str] | None = None) -> int:
         run_tui(args.directory)
         return 0
     if args.command == "web":
+        from ainovel.entry.auth import AuthError
         from ainovel.entry.web import serve
 
-        serve(host=args.host, port=args.port)
+        try:
+            serve(host=args.host, port=args.port)
+        except AuthError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         return 0
     if args.command == "import":
         from ainovel.host.config import load_config

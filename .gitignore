@@ -7,3 +7,4 @@ dist/
 build/
 web/node_modules/
 web/dist/
+src/ainovel/static/

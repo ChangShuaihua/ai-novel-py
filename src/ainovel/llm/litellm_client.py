@@ -21,12 +21,21 @@ class LiteLLMTransport:
         self.idle_timeout = idle_timeout
         self.on_delta = on_delta
 
-    def complete(self, model: ModelRef, messages: list[dict], tools: list[dict]) -> Completion:
+    def complete(
+        self,
+        model: ModelRef,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        max_tokens: int | None = None,
+    ) -> Completion:
         kwargs: dict[str, Any] = {
             "model": model.litellm_model(),
             "messages": messages,
             "stream": True,
         }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         if tools:
             kwargs["tools"] = tools
         if model.api_key:

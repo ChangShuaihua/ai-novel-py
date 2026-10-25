@@ -3,11 +3,14 @@
 import json
 import logging
 import mimetypes
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from ainovel.entry.auth import AuthError, AuthStore, Tokens, read_cookie
 from ainovel.entry.desk import Desk, DeskError
+from ainovel.resources import package_dir
 
 logger = logging.getLogger(__name__)
 mimetypes.add_type("application/javascript", ".js")
@@ -17,23 +20,60 @@ mimetypes.add_type("image/svg+xml", ".svg")
 _MAX_BODY = 1_000_000
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, desk: Desk | None = None, static_dir: Path | None = None) -> None:
-    studio = desk or Desk()
+class Accounts:
+    """每个名字一份书架、模型配置和书目录。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._lock = threading.Lock()
+        self._desks: dict[str, Desk] = {}
+
+    def desk_for(self, user_id: str) -> Desk:
+        if not user_id.isalnum():
+            raise DeskError("先登录。")
+        with self._lock:
+            desk = self._desks.get(user_id)
+            if desk is None:
+                home = self.root / "accounts" / user_id
+                desk = Desk(
+                    library_path=home / "library.json",
+                    config_path=home / "config.json",
+                    books_root=home / "books",
+                )
+                self._desks[user_id] = desk
+            return desk
+
+    def shutdown(self) -> None:
+        with self._lock:
+            desks = list(self._desks.values())
+        for desk in desks:
+            desk.shutdown()
+
+
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    static_dir: Path | None = None,
+    auth: AuthStore | None = None,
+    accounts: Accounts | None = None,
+) -> None:
+    door = auth or AuthStore()
+    shelf = accounts or Accounts(door.root)
     root = Path(static_dir) if static_dir is not None else _dist_dir()
-    server = ThreadingHTTPServer((host, port), _handler(studio, root))
+    server = ThreadingHTTPServer((host, port), _handler(shelf, root, door))
     print(f"写作控制室 http://{host}:{port}", flush=True)
     try:
         server.serve_forever()
     finally:
-        studio.shutdown()
+        shelf.shutdown()
         server.server_close()
 
 
 def _dist_dir() -> Path:
-    return Path(__file__).resolve().parents[3] / "web" / "dist"
+    return package_dir("static")
 
 
-def _handler(desk: Desk, static_dir: Path):
+def _handler(accounts: Accounts, static_dir: Path, auth: AuthStore):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -42,24 +82,59 @@ def _handler(desk: Desk, static_dir: Path):
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
-            if parsed.path == "/api/library":
-                self._send(200, desk.library())
-                return
-            if parsed.path == "/api/model":
-                self._send(200, desk.model_settings())
-                return
-            if parsed.path == "/api/snapshot":
-                query = parse_qs(parsed.query)
-                directory = (query.get("directory") or [""])[0]
-                try:
-                    self._send(200, desk.snapshot(directory))
-                except DeskError as exc:
-                    self._send(404, {"error": str(exc)})
+            if parsed.path.startswith("/api/"):
+                if not self._same_origin():
+                    self._send(403, {"error": "拒绝跨站请求。"})
+                    return
+                if parsed.path == "/api/session":
+                    self._session()
+                    return
+                desk = self._desk()
+                if desk is None:
+                    return
+                if parsed.path == "/api/library":
+                    self._send(200, desk.library())
+                    return
+                if parsed.path == "/api/model":
+                    self._send(200, self._owned(desk.model_settings()))
+                    return
+                if parsed.path == "/api/snapshot":
+                    query = parse_qs(parsed.query)
+                    directory = (query.get("directory") or [""])[0]
+                    try:
+                        self._send(200, desk.snapshot(directory))
+                    except DeskError as exc:
+                        self._send(404, {"error": str(exc)})
+                    return
+                self._send(404, {"error": "没有这个接口"})
                 return
             self._file(parsed.path)
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
+            if not self._same_origin():
+                self._drain()
+                self._send(403, {"error": "拒绝跨站请求。"})
+                return
+            if parsed.path == "/api/register":
+                self._register()
+                return
+            if parsed.path == "/api/login":
+                self._login()
+                return
+            if parsed.path == "/api/refresh":
+                self._refresh()
+                return
+            if parsed.path == "/api/logout":
+                self._logout()
+                return
+            desk = self._desk()
+            if desk is None:
+                self._drain()
+                return
+            if parsed.path == "/api/password":
+                self._password()
+                return
             try:
                 payload = self._body()
             except DeskError as exc:
@@ -86,8 +161,11 @@ def _handler(desk: Desk, static_dir: Path):
                 if parsed.path == "/api/save-file":
                     self._send(200, desk.pick_save_file(str(payload.get("name") or "")))
                     return
+                if parsed.path == "/api/model/check":
+                    self._send(200, self._owned(desk.probe_model(payload)))
+                    return
                 if parsed.path == "/api/model":
-                    self._send(200, desk.save_model(payload))
+                    self._send(200, self._owned(desk.save_model(payload)))
                     return
                 if parsed.path == "/api/intent":
                     self._send(200, desk.intent(payload))
@@ -106,9 +184,142 @@ def _handler(desk: Desk, static_dir: Path):
                 return
             super().log_message(fmt, *args)
 
+        def _session(self) -> None:
+            try:
+                user = auth.authenticate(self._bearer())
+            except AuthError:
+                self._send(200, {"authenticated": False, "username": ""})
+                return
+            self._send(200, {"authenticated": True, "username": user["username"]})
+
+        def _register(self) -> None:
+            try:
+                payload = self._body()
+            except DeskError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            try:
+                tokens = auth.register(
+                    str(payload.get("username") or ""),
+                    str(payload.get("password") or ""),
+                    str(self.client_address[0]),
+                )
+            except AuthError as exc:
+                self._send(exc.status, {"error": str(exc)})
+                return
+            self._credential(tokens)
+
+        def _login(self) -> None:
+            try:
+                payload = self._body()
+            except DeskError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            try:
+                tokens = auth.login(
+                    str(payload.get("username") or ""),
+                    str(payload.get("password") or ""),
+                    str(self.client_address[0]),
+                )
+            except AuthError as exc:
+                self._send(exc.status, {"error": str(exc)})
+                return
+            self._credential(tokens)
+
+        def _refresh(self) -> None:
+            try:
+                payload = self._body()
+            except DeskError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            token = str(payload.get("refresh_token") or "") or read_cookie(self.headers.get("Cookie"))
+            try:
+                tokens = auth.refresh(token)
+            except AuthError as exc:
+                cookies = (auth.clear_cookie(),) if exc.status == 401 else ()
+                self._send(exc.status, {"error": str(exc)}, cookies=cookies)
+                return
+            self._credential(tokens)
+
+        def _logout(self) -> None:
+            self._drain()
+            auth.logout(self._bearer(), read_cookie(self.headers.get("Cookie")))
+            self._send(200, {"authenticated": False, "username": ""}, cookies=(auth.clear_cookie(),))
+
+        def _password(self) -> None:
+            try:
+                payload = self._body()
+            except DeskError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            try:
+                tokens = auth.change_password(
+                    self._bearer(),
+                    str(payload.get("current") or ""),
+                    str(payload.get("username") or ""),
+                    str(payload.get("password") or ""),
+                )
+            except AuthError as exc:
+                self._send(exc.status, {"error": str(exc)})
+                return
+            self._credential(tokens)
+
+        def _credential(self, tokens: Tokens) -> None:
+            self._send(
+                200,
+                {
+                    "authenticated": True,
+                    "username": tokens.username,
+                    "access_token": tokens.access_token,
+                    "refresh_token": tokens.refresh_token,
+                    "token_type": "bearer",
+                    "expires_in": tokens.expires_in,
+                },
+                cookies=(auth.refresh_cookie(tokens.refresh_token),),
+            )
+
+        def _desk(self) -> Desk | None:
+            try:
+                user = auth.authenticate(self._bearer())
+            except AuthError as exc:
+                self._send(exc.status, {"error": str(exc)})
+                return None
+            self._account = user
+            try:
+                return accounts.desk_for(user["id"])
+            except DeskError as exc:
+                self._send(401, {"error": str(exc)})
+                return None
+
+        def _owned(self, view: dict) -> dict:
+            user = getattr(self, "_account", None) or {}
+            view["username"] = str(user.get("username") or "")
+            return view
+
+        def _bearer(self) -> str:
+            scheme, _, token = (self.headers.get("Authorization") or "").partition(" ")
+            if scheme.lower() != "bearer":
+                return ""
+            return token.strip()
+
+        def _same_origin(self) -> bool:
+            origin = self.headers.get("Origin")
+            if origin:
+                return urlparse(origin).netloc == (self.headers.get("Host") or "")
+            return self.headers.get("Sec-Fetch-Site") != "cross-site"
+
+        def _drain(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length < 0 or length > _MAX_BODY:
+                self.close_connection = True
+                return
+            if length:
+                self.rfile.read(length)
+
         def _body(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
             if length > _MAX_BODY:
+                self.close_connection = True
                 raise DeskError("请求过大")
             raw = self.rfile.read(length) if length else b"{}"
             try:
@@ -135,18 +346,17 @@ def _handler(desk: Desk, static_dir: Path):
                 mime += "; charset=utf-8"
             self._bytes(200, mime, target.read_bytes(), cache=target.suffix != ".html")
 
-        def _send(self, status: int, payload: dict) -> None:
+        def _send(self, status: int, payload: dict, cookies: tuple[str, ...] = ()) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self._bytes(status, "application/json; charset=utf-8", body, cache=False)
+            self._bytes(status, "application/json; charset=utf-8", body, cache=False, cookies=cookies)
 
-        def _bytes(self, status: int, content_type: str, body: bytes, *, cache: bool = True) -> None:
+        def _bytes(self, status: int, content_type: str, body: bytes, *, cache: bool = True, cookies: tuple[str, ...] = ()) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store" if not cache else "public, max-age=3600")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            for cookie in cookies:
+                self.send_header("Set-Cookie", cookie)
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)

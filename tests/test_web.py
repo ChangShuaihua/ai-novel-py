@@ -14,6 +14,7 @@ from ainovel.flow.model import Instruction
 from ainovel.host.engine import Engine
 from ainovel.host.snapshot import build_snapshot, shelf_row
 from ainovel.importers.pipeline import ingest, run
+from ainovel.llm.errors import ProviderError
 from ainovel.llm.types import Completion
 from ainovel.store.book import Book
 
@@ -307,6 +308,46 @@ def test_model_screen_saves_without_returning_the_key(tmp_path: Path):
     desk._retire_host_if_stale()
     assert desk.model_settings()["live_stale"] is False
     assert desk.config_ready() is True
+    reopened = Desk(library_path=tmp_path / "library.json", config_path=config, books_root=tmp_path / "new")
+    assert reopened.model_settings()["model"] == "gpt-4.1"
+    assert reopened.model_settings()["api_key_set"] is True
+
+
+def test_probe_uses_the_saved_key_and_does_not_rewrite_it(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({"provider": "openai", "model": "gpt-4.1", "api_key": "sk-test-secret-value"}),
+        encoding="utf-8",
+    )
+    desk = Desk(library_path=tmp_path / "library.json", config_path=config, books_root=tmp_path / "new")
+    before = config.read_text(encoding="utf-8")
+    seen = {}
+
+    class Transport:
+        def complete(self, model, messages, tools, max_tokens=None):
+            seen["key"] = model.api_key
+            seen["max_tokens"] = max_tokens
+            return Completion(content="好")
+
+    result = desk.probe_model(
+        {"provider": "openai", "model": "gpt-4.1", "api_key": "", "api_base": "", "style": ""},
+        transport=Transport(),
+    )
+    assert result == {"ok": True, "model_label": "openai/gpt-4.1", "reply": "好"}
+    assert seen == {"key": "sk-test-secret-value", "max_tokens": 16}
+    assert config.read_text(encoding="utf-8") == before
+
+    class Denied:
+        def complete(self, model, messages, tools, max_tokens=None):
+            raise ProviderError(f"invalid {model.api_key}", kind="auth")
+
+    failed = desk.probe_model(
+        {"provider": "openai", "model": "gpt-4.1", "api_key": "sk-test-secret-value", "api_base": "", "style": ""},
+        transport=Denied(),
+    )
+    assert failed["ok"] is False
+    assert "密钥" in failed["error"]
+    assert "sk-test" not in json.dumps(failed)
 
 
 def test_discard_puts_a_book_in_the_wastebasket_without_deleting_files(tmp_path: Path):

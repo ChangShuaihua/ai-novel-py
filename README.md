@@ -37,7 +37,7 @@ python -m pytest
 
 `provider` 和 `model` 必填。传给 LiteLLM 的模型名是 `provider/model`；`model` 本身已带 `/` 时原样使用。`api_key`、`api_base` 留空则不传入，由 LiteLLM 按该提供方的常规方式取密钥。
 
-`style` 选用内置风格预设：`default`、`fantasy`、`romance`、`suspense`。留空则不附加风格预设。文风正文的覆盖顺序是：本书 `<书目录>/style/`，然后 `~/.ainovel/style/`，再然后内置 `assets/`。
+`style` 选用内置风格预设：`default`、`fantasy`、`romance`、`suspense`。留空则不附加风格预设。文风正文的覆盖顺序是：本书 `<书目录>/style/`，然后 `~/.ainovel/style/`，再然后包内 `ainovel/assets/`。
 
 规划、写作、审阅和裁定共用这份默认模型。调用超时会在同一提供方上重试。
 
@@ -91,7 +91,7 @@ python -m ainovel.entry.headless import books/demo novel.txt --yes
 | `diag DIRECTORY` | 只读检查缺章和规则问题，并输出检查点骨架 |
 | `eval DIRECTORY --right STYLE [--left STYLE]` | 用生产文风组装比较两套风格，打印 `same` 或 `different` |
 | `tui DIRECTORY` | 订阅宿主事件。需要已安装 `textual`，并且存在模型配置 |
-| `web [--host 127.0.0.1] [--port 8765]` | 本机写作控制室。界面在 `web/`，先构建再打开 |
+| `web [--host 127.0.0.1] [--port 8765]` | 本机写作控制室。界面在 `web/`，先构建再打开。浏览器要先登记或登录 |
 
 正在运行的写作，结束那个进程后再 `resume`。`abort` 只作用于本次打开的引擎。
 
@@ -154,4 +154,6 @@ cd ..
 python -m ainovel.entry.headless web
 ```
 
-浏览器打开 <http://127.0.0.1:8765>。改界面时可以另开 `npm run dev`，页面在 <http://127.0.0.1:5173>，接口仍由上面的命令提供。
+`npm run build` 把页面写进包内 `src/ainovel/static/`，控制室从安装包读取。浏览器打开 <http://127.0.0.1:8765>，先登记或登录再进自己的书架。账号写在 `~/.ainovel/users.json`，密码只存散列。登录发出一对 JWT：访问令牌大约 15 分钟，放在内存里，请求带 `Authorization: Bearer`；刷新令牌大约 7 天，放在 HttpOnly cookie 里，也写在登录响应中。访问令牌过期后用刷新令牌换一对新的，旧的刷新令牌立即作废。改密码或离开会使已发出的令牌失效。每个人的书架和模型配置在 `~/.ainovel/accounts/` 下分开。命令行的 `start`、`resume` 仍由本机直接执行，不经过这道登录。
+
+改界面时可以另开 `npm run dev`，页面在 <http://127.0.0.1:5173>，接口仍由上面的命令提供。

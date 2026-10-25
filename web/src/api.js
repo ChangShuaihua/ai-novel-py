@@ -1,16 +1,121 @@
 import { useCallback, useEffect, useState } from "react"
 
-async function request(url, options) {
-  const response = await fetch(url, options)
-  let data = {}
+let accessToken = ""
+let currentName = ""
+let refreshing = null
+
+export function currentUsername() {
+  return currentName
+}
+
+function remember(data) {
+  accessToken = data.access_token || ""
+  currentName = data.username || ""
+}
+
+function forget() {
+  accessToken = ""
+  currentName = ""
+}
+
+async function readJson(response) {
   try {
-    data = await response.json()
+    return await response.json()
   } catch {
-    data = {}
+    return {}
+  }
+}
+
+export function refreshAccess() {
+  if (!refreshing) {
+    refreshing = fetch("/api/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    })
+      .then(async (response) => {
+        const data = await readJson(response)
+        if (!response.ok || !data.access_token) {
+          forget()
+          return false
+        }
+        remember(data)
+        return true
+      })
+      .finally(() => {
+        refreshing = null
+      })
+  }
+  return refreshing
+}
+
+async function request(url, options = {}, allowRefresh = true) {
+  const { quietAuth, ...rest } = options
+  const headers = { ...(rest.headers || {}) }
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+  let response = await fetch(url, { ...rest, headers })
+  if (response.status === 401 && allowRefresh && !quietAuth) {
+    const renewed = await refreshAccess()
+    if (renewed) return request(url, options, false)
+  }
+  const data = await readJson(response)
+  if (response.status === 401 && !quietAuth) {
+    forget()
+    window.dispatchEvent(new CustomEvent("ainovel-unauthenticated"))
   }
   if (!response.ok) {
     throw new Error(data.error || "请求没有完成")
   }
+  return data
+}
+
+export async function restoreSession() {
+  const ok = await refreshAccess()
+  return { authenticated: ok, username: currentName }
+}
+
+export async function login(username, password) {
+  const data = await request("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+    quietAuth: true,
+  })
+  remember(data)
+  return data
+}
+
+export async function register(username, password) {
+  const data = await request("/api/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+    quietAuth: true,
+  })
+  remember(data)
+  return data
+}
+
+export async function logout() {
+  try {
+    await request("/api/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      quietAuth: true,
+    }, false)
+  } finally {
+    forget()
+  }
+}
+
+export async function changePassword(payload) {
+  const data = await request("/api/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  remember(data)
   return data
 }
 
@@ -69,6 +174,14 @@ export function getModel() {
 
 export function saveModel(payload) {
   return request("/api/model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function checkModel(payload) {
+  return request("/api/model/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

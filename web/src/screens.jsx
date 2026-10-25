@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { attachBook, bookHref, emptyTrash, getLibrary, getModel, moveBook, pickDirectory, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
+import { attachBook, bookHref, checkModel, currentUsername, emptyTrash, getLibrary, getModel, moveBook, pickDirectory, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
 import { blocks, deskState } from "./deskState.js"
 import {
   DEFAULT_MODEL,
@@ -14,13 +14,42 @@ import {
 import { bookTitle, exportFileName, flowLabel, folderName, holdLabel, phaseLabel, scopeLabel, severityLabel, shortPath, stepLabel } from "./labels.js"
 import { markLabel, progressCaption, progressView } from "./progressView.js"
 
-export function Shelf() {
+const STARRED = "ainovel-stars"
+const SHELF_VIEWS = [
+  ["all", "我的书架"],
+  ["recent", "最近阅读"],
+  ["done", "已完结"],
+  ["stars", "收藏"],
+]
+
+function readStars() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STARRED) || "[]")
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function Shelf({ onLeave }) {
   const [library, setLibrary] = useState(null)
   const [picking, setPicking] = useState(false)
   const [loadError, setLoadError] = useState("")
   const [actionError, setActionError] = useState("")
   const [basketHot, setBasketHot] = useState(false)
+  const [view, setView] = useState("all")
+  const [query, setQuery] = useState("")
+  const [searching, setSearching] = useState(false)
+  const [stars, setStars] = useState(readStars)
+  const [accountOpen, setAccountOpen] = useState(false)
   const dragged = useRef(false)
+
+  useEffect(() => {
+    if (!accountOpen) return undefined
+    function close() { setAccountOpen(false) }
+    window.addEventListener("pointerdown", close)
+    return () => window.removeEventListener("pointerdown", close)
+  }, [accountOpen])
 
   useEffect(() => {
     let stop = false
@@ -60,7 +89,26 @@ export function Shelf() {
 
   const books = library?.books || []
   const trash = library?.trash || []
-  const cloths = clothsFor(books)
+  const needle = query.trim()
+  const shown = books.filter((book) => {
+    const title = book.title || folderName(book.directory)
+    if (needle && !title.includes(needle)) return false
+    if (view === "recent") return Boolean(book.has_progress)
+    if (view === "done") return book.phase === "complete"
+    if (view === "stars") return stars.includes(book.directory)
+    return true
+  })
+  const cloths = clothsFor(shown)
+
+  function toggleStar(directory) {
+    setStars((current) => {
+      const next = current.includes(directory)
+        ? current.filter((item) => item !== directory)
+        : [...current, directory]
+      try { localStorage.setItem(STARRED, JSON.stringify(next)) } catch { /* 记不住时，这一页仍可看 */ }
+      return next
+    })
+  }
 
   function dragBook(event, directory) {
     dragged.current = false
@@ -98,89 +146,259 @@ export function Shelf() {
       setActionError(reason.message)
     }
   }
+  const emptyCopy = books.length === 0
+    ? ["暂无书籍", "去创作一本属于你的故事吧"]
+    : view === "recent"
+      ? ["还没有写过的书", "点进一本，写起来才算读过"]
+      : view === "done"
+        ? ["还没有完本", "写完的书会出现在这里"]
+        : view === "stars"
+          ? ["还没有收藏", "书脊上的星，可以把一本书留在这里"]
+          : ["没有符合的书", "换一个字，或回到我的书架"]
+
   return (
-    <main className="page">
-      <header className="page-head">
-        <h1>书架</h1>
-        <p className="lede">每本书只回答现在写到哪。点进去，再决定下一步谁动。</p>
+    <div className="hall">
+      <header className="hall-bar">
+        <a className="mark" href="#/">
+          <span className="seal" aria-hidden="true">文</span>
+          <span className="mark-name">ainovel</span>
+        </a>
+        <span className="hall-here">书架</span>
+        <div className="hall-tools">
+          {searching ? (
+            <input
+              className="hall-search"
+              value={query}
+              placeholder="书名"
+              aria-label="搜索书名"
+              autoFocus
+              onChange={(event) => setQuery(event.target.value)}
+              onPointerDown={(event) => event.stopPropagation()}
+            />
+          ) : (
+            <button type="button" className="hall-tool" onClick={() => setSearching(true)}>
+              <SearchIcon /> 搜索
+            </button>
+          )}
+          <button type="button" className="hall-tool" onClick={() => { setView("all"); setQuery(""); setSearching(false) }}>
+            <WorksIcon /> 我的作品
+          </button>
+          <div className="hall-account" onPointerDown={(event) => event.stopPropagation()}>
+            <button type="button" className="hall-tool" aria-expanded={accountOpen} onClick={() => setAccountOpen((open) => !open)}>
+              <PersonIcon /> {currentUsername() || "登录"}
+            </button>
+            {accountOpen ? (
+              <div className="hall-pop">
+                <a href="#/model">接入模型</a>
+                <a href="#/pass">改密码</a>
+                <button type="button" onClick={onLeave}>离开</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </header>
-      {library && !library.config_ready ? (
-        <p className="banner" role="status">
-          还没接入模型。需要模型的动作先停在这里。 <a href="#/model">接入模型</a>
-        </p>
-      ) : library?.model_label ? (
-        <p className="model-line">当前模型 {library.model_label} · <a href="#/model">更换</a></p>
-      ) : null}
-      {actionError || loadError ? <p className="banner" role="status">{actionError || loadError}</p> : null}
-      <div className="shelf-room">
-      {books.length === 0 ? (
-        <section className="bookcase bookcase-empty">
-          <p>书架还是空的。</p>
-          <a className="signal" href="#/new">新建</a>
-        </section>
-      ) : (
-        <ul className="bookcase">
-          {books.map((book, index) => {
-            const href = book.has_progress ? bookHref("/desk", book.directory) : bookHref("/new", book.directory)
-            const title = book.title || folderName(book.directory)
-            const known = book.total_chapters > 0
-            const pct = known ? Math.min(100, Math.round((100 * book.completed_count) / book.total_chapters)) : 0
-            const count = known ? `${book.completed_count}/${book.total_chapters}` : String(book.completed_count)
-            return (
-              <li key={book.directory}>
-              <a
-                className={book.locked ? "volume held" : "volume"}
-                data-cloth={cloths[index]}
-                href={href}
-                title={book.directory}
-                draggable
-                style={{ width: spineWidth(book) }}
-                onDragStart={(event) => dragBook(event, book.directory)}
-                onDragEnd={() => {
-                  dragged.current = true
-                  window.setTimeout(() => { dragged.current = false }, 0)
-                }}
-                onClick={(event) => {
-                  if (!dragged.current) return
-                  event.preventDefault()
-                  dragged.current = false
-                }}
-              >
-                <span className="spine">
-                  {known ? <span className="ribbon" style={{ height: `${pct}%` }} aria-hidden="true" /> : null}
-                  <span className="spine-title">{title}</span>
-                  <span className="spine-foot">
-                    <span>{phaseLabel(book.phase) || "未开始"}</span>
-                    <span>{count}{book.locked ? " · 占" : ""}</span>
-                  </span>
-                </span>
-              </a>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      <Wastebasket
-        trash={trash}
-        hot={basketHot}
-        onDragOver={(event) => {
-          event.preventDefault()
-          event.dataTransfer.dropEffect = "move"
-          setBasketHot(true)
-        }}
-        onDragLeave={() => setBasketHot(false)}
-        onDrop={dropInBasket}
-        onRestore={restoreBook}
-        onEmpty={clearTrash}
-      />
+      <div className="hall-stage">
+        <header className="hall-title">
+          <h1>书架<span className="hall-seal" aria-hidden="true">架</span></h1>
+          <p>每本书只回答现在写到哪。点进去，再决定下一步谁动。</p>
+        </header>
+        {library && !library.config_ready ? (
+          <p className="banner" role="status">
+            还没接入模型。需要模型的动作先停在这里。 <a href="#/model">接入模型</a>
+          </p>
+        ) : library?.model_label ? (
+          <p className="model-line">当前模型 {library.model_label} · <a href="#/model">更换</a></p>
+        ) : null}
+        {actionError || loadError ? <p className="banner" role="status">{actionError || loadError}</p> : null}
+        <div className="hall-body">
+          <nav className="hall-menu" aria-label="书架分类">
+            {SHELF_VIEWS.map(([id, label]) => (
+              <button key={id} type="button" aria-current={view === id ? "true" : undefined} onClick={() => setView(id)}>
+                <ViewIcon id={id} /> {label}
+              </button>
+            ))}
+            <Wastebasket
+              trash={trash}
+              hot={basketHot}
+              onDragOver={(event) => {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = "move"
+                setBasketHot(true)
+              }}
+              onDragLeave={() => setBasketHot(false)}
+              onDrop={dropInBasket}
+              onRestore={restoreBook}
+              onEmpty={clearTrash}
+            />
+          </nav>
+          <section className="hall-case" aria-label="书架">
+            <i className="hall-corner tl" aria-hidden="true" />
+            <i className="hall-corner tr" aria-hidden="true" />
+            <i className="hall-corner bl" aria-hidden="true" />
+            <i className="hall-corner br" aria-hidden="true" />
+            <div className="hall-bay">
+              {shown.length === 0 ? (
+                <div className="hall-empty">
+                  <EmptyBooks />
+                  <p>{emptyCopy[0]}</p>
+                  <p className="hall-empty-sub">{emptyCopy[1]}</p>
+                </div>
+              ) : (
+                <ul className="bookcase">
+                  {shown.map((book, index) => {
+                    const href = book.has_progress ? bookHref("/desk", book.directory) : bookHref("/new", book.directory)
+                    const title = book.title || folderName(book.directory)
+                    const known = book.total_chapters > 0
+                    const pct = known ? Math.min(100, Math.round((100 * book.completed_count) / book.total_chapters)) : 0
+                    const count = known ? `${book.completed_count}/${book.total_chapters}` : String(book.completed_count)
+                    const starred = stars.includes(book.directory)
+                    return (
+                      <li key={book.directory}>
+                        <a
+                          className={book.locked ? "volume held" : "volume"}
+                          data-cloth={cloths[index]}
+                          href={href}
+                          title={book.directory}
+                          draggable
+                          style={{ width: spineWidth(book) }}
+                          onDragStart={(event) => dragBook(event, book.directory)}
+                          onDragEnd={() => {
+                            dragged.current = true
+                            window.setTimeout(() => { dragged.current = false }, 0)
+                          }}
+                          onClick={(event) => {
+                            if (!dragged.current) return
+                            event.preventDefault()
+                            dragged.current = false
+                          }}
+                        >
+                          <span className="spine">
+                            {known ? <span className="ribbon" style={{ height: `${pct}%` }} aria-hidden="true" /> : null}
+                            <span className="spine-title">{title}</span>
+                            <span className="spine-foot">
+                              <span>{phaseLabel(book.phase) || "未开始"}</span>
+                              <span>{count}{book.locked ? " · 占" : ""}</span>
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className={starred ? "hall-star on" : "hall-star"}
+                            aria-label={starred ? `取消收藏《${title}》` : `收藏《${title}》`}
+                            aria-pressed={starred}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              toggleStar(book.directory)
+                            }}
+                          >★</button>
+                        </a>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              <i className="hall-board" aria-hidden="true" />
+              <div className="hall-lower">
+                <a className="hall-new" href="#/new">+ 新建</a>
+                <button className="hall-pick" type="button" disabled={picking} onClick={chooseDirectory}>
+                  {picking ? "正在选择目录" : "选择目录"}
+                </button>
+              </div>
+              <i className="hall-board" aria-hidden="true" />
+            </div>
+          </section>
+          <aside className="hall-scroll">
+            <p>一书一世界</p>
+            <p>一页一人生</p>
+          </aside>
+        </div>
       </div>
-      <div className="attach pick-row">
-        <button className="signal" type="button" disabled={picking} onClick={chooseDirectory}>
-          {picking ? "正在选择目录" : "选择目录"}
-        </button>
-        <a className="quiet-link" href="#/new">新建</a>
-      </div>
-    </main>
+    </div>
+  )
+}
+
+function ViewIcon({ id }) {
+  if (id === "recent") return <ClockIcon />
+  if (id === "done") return <CheckIcon />
+  if (id === "stars") return <StarIcon />
+  return <ShelfIcon />
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M16 16.5L20 20.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function WorksIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 5.5h9.5a2 2 0 0 1 2 2V19H8.2A2.2 2.2 0 0 0 6 21.2V5.5z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 19.2A2.2 2.2 0 0 1 8.2 17H17.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
+function PersonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 19c1.2-2.6 3.2-3.8 6-3.8s4.8 1.2 6 3.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ShelfIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M8 7V4.5h3V7M13 12V9.5h3V12" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 8.5V12l2.5 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8.5 12.2l2.3 2.3 4.7-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function StarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4.5l1.8 4.2 4.6.5-3.4 3.1.9 4.5L12 14.6 8.1 16.8l.9-4.5L5.6 9.2l4.6-.5L12 4.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  )
+}
+
+function EmptyBooks() {
+  return (
+    <svg className="hall-still" viewBox="0 0 160 90" aria-hidden="true">
+      <path d="M46 62V34h22v28H46z" fill="#efe6d4" />
+      <path d="M50 62V38h14v24H50z" fill="#8e2f2a" />
+      <path d="M68 62V30h18v32H68z" fill="#2c4a44" />
+      <path d="M86 62V36h16v26H86z" fill="#c4a36a" />
+      <path d="M38 58h78v6H38z" fill="#f6efe4" />
+      <path d="M104 50h28v12H104z" fill="#f3eadc" />
+      <path d="M108 46h18v6h-18z" fill="#f7f1e8" />
+      <path d="M128 38c6 0 10 8 10 16h-8c0-6-2-10-6-10 2-4 3-6 4-6z" fill="#d9c7aa" />
+      <path d="M132 28v12M128 32h8" stroke="#5c4030" strokeWidth="1.4" />
+    </svg>
   )
 }
 
@@ -273,7 +491,10 @@ export function ModelScreen() {
   const [keyHint, setKeyHint] = useState("")
   const [clearKey, setClearKey] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [owner, setOwner] = useState("")
+  const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
 
@@ -285,6 +506,8 @@ export function ModelScreen() {
         applySettings(settings, {
           setProvider, setModel, setApiBase, setStyle, setKeySet, setKeyHint, setError,
         })
+        setOwner(settings.username || "")
+        setReady(Boolean(settings.ready))
         if (!settings.provider) setProvider(DEFAULT_PROVIDER)
         if (!settings.model) setModel(modelForProvider(settings.provider || DEFAULT_PROVIDER, DEFAULT_MODEL))
         setLoaded(true)
@@ -318,32 +541,56 @@ export function ModelScreen() {
     ? `${keyHint ? `已保存 ${keyHint}` : "已保存"}。留空则保持。`
     : "留空时，调用层按该提供方的环境变量取密钥。"
 
+  function payload() {
+    return {
+      provider: provider.trim(),
+      model: model.trim(),
+      api_key: apiKey,
+      api_base: apiBase.trim(),
+      style,
+      clear_key: clearKey && !apiKey.trim(),
+    }
+  }
+
   async function submit(event) {
     event.preventDefault()
     setBusy(true)
     setError("")
     setNotice("")
     try {
-      const saved = await saveModel({
-        provider: provider.trim(),
-        model: model.trim(),
-        api_key: apiKey,
-        api_base: apiBase.trim(),
-        style,
-        clear_key: clearKey && !apiKey.trim(),
-      })
+      const saved = await saveModel(payload())
       applySettings(saved, {
         setProvider, setModel, setApiBase, setStyle, setKeySet, setKeyHint, setError,
       })
+      setOwner(saved.username || owner)
+      setReady(Boolean(saved.ready))
       setApiKey("")
       setClearKey(false)
-      setNotice(saved.live_stale
-        ? "已保存。当前这次写作仍用原来的模型，结束后换上这一份。"
-        : "已保存。下一轮写作使用这份模型。")
+      const kept = saved.username ? `已保存到 ${saved.username} 的账号，离开后再进来还是这一份。` : "已保存到当前账号，离开后再进来还是这一份。"
+      setNotice(saved.live_stale ? `${kept}当前这次写作仍用原来的模型，结束后换上。` : kept)
     } catch (reason) {
       setError(reason.message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function check() {
+    setChecking(true)
+    setError("")
+    setNotice("")
+    try {
+      const result = await checkModel(payload())
+      if (result.ok) {
+        const reply = result.reply ? `应答：${result.reply}` : "模型有应答。"
+        setNotice(`检测通过。${reply}`)
+      } else {
+        setError(result.error || "检测没有通过。")
+      }
+    } catch (reason) {
+      setError(reason.message)
+    } finally {
+      setChecking(false)
     }
   }
 
@@ -359,7 +606,8 @@ export function ModelScreen() {
     <main className="page narrow">
       <p className="eyebrow"><a href="#/">书架</a></p>
       <h1>接入模型</h1>
-      <p className="lede">规划、写作、审阅和裁定共用这一份。配置写在本机，命令行读的也是它。页面不显示完整密钥。</p>
+      <p className="lede">规划、写作、审阅和裁定共用这一份。它只属于当前账号，写在这个账号的目录里。离开、关掉再进来，还是这一份。页面不显示完整密钥。</p>
+      {ready && owner ? <p className="model-line">已绑定 {owner}{named ? ` · ${named}` : ""}</p> : null}
       <form className="model-form" autoComplete="off" onSubmit={submit}>
         <label>
           提供方
@@ -398,7 +646,14 @@ export function ModelScreen() {
         </label>
         {error ? <p className="banner" role="status">{error}</p> : null}
         {notice ? <p className="banner ok" role="status">{notice}</p> : null}
-        <button className="signal" type="submit" disabled={busy || !loaded || !provider.trim() || !model.trim()}>保存</button>
+        <div className="model-actions">
+          <button className="signal" type="submit" disabled={busy || checking || !loaded || !provider.trim() || !model.trim()}>
+            {busy ? "保存中" : "保存"}
+          </button>
+          <button className="quiet" type="button" disabled={busy || checking || !loaded || !provider.trim() || !model.trim()} onClick={check}>
+            {checking ? "检测中" : "检测"}
+          </button>
+        </div>
       </form>
     </main>
   )

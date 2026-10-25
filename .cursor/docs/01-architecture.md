@@ -51,7 +51,8 @@ flowchart TD
 ```text
 ainovel/
   domain/ store/ flow/ tools/ arbiter/ agents/ host/ entry/ llm/
-assets/prompts/ assets/references/ assets/styles/
+  assets/prompts/ assets/references/ assets/styles/ assets/voice.md
+  static/    web 构建结果，源码在仓库根的 web/
 ```
 
 ## 四条铁律

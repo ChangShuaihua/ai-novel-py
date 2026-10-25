@@ -1,6 +1,7 @@
 """用户目录里的模型配置。缺配置时直接失败。"""
 
 import json
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -94,5 +95,14 @@ def store_config(
     raw["style"] = style
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(raw, ensure_ascii=False, indent=2) + "\n"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
     temporary.replace(path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass

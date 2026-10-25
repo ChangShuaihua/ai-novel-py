@@ -11,6 +11,9 @@ from ainovel.diag import diagnose
 from ainovel.exporting import export_txt
 from ainovel.host.config import ConfigError, config_dir, describe_model, load_config, store_config
 from ainovel.host.host import Host, HostError
+from ainovel.llm.errors import ProviderError
+from ainovel.llm.litellm_client import LiteLLMTransport
+from ainovel.llm.types import ModelRef
 from ainovel.host.snapshot import build_snapshot, has_progress, shelf_row
 from ainovel.importers.pipeline import ImportError, accept_segmentation, ingest, run
 from ainovel.listing import build_listing
@@ -147,6 +150,32 @@ class Desk:
         store_config(self._config_file(), **fields)
         self._drop_current_host()
         return self.model_settings()
+
+    def probe_model(self, payload: dict, transport=None) -> dict:
+        """问模型一句短话。不写配置，密钥留在账号文件里。"""
+        fields = _model_fields(payload)
+        if not fields["api_key"]:
+            fields["api_key"] = self._existing_key()
+        label = _model_label({"ready": True, "provider": fields["provider"], "model": fields["model"]})
+        client = transport or LiteLLMTransport(idle_timeout=20)
+        try:
+            result = client.complete(
+                ModelRef(
+                    provider=fields["provider"],
+                    model=fields["model"],
+                    api_key=fields["api_key"],
+                    api_base=fields["api_base"],
+                ),
+                [{"role": "user", "content": "只回复一个字：好"}],
+                [],
+                max_tokens=16,
+            )
+        except ProviderError as exc:
+            return {"ok": False, "model_label": label, "error": _probe_error(exc, fields["api_key"])}
+        reply = " ".join((result.content or "").split())
+        if len(reply) > 80:
+            reply = reply[:80] + "…"
+        return {"ok": True, "model_label": label, "reply": reply}
 
     def pick_directory(self) -> dict:
         if not self._pick_guard.acquire(blocking=False):
@@ -730,6 +759,25 @@ def _export_name(name: str) -> str:
     stem = cleaned[:-4] if cleaned.lower().endswith(".txt") else cleaned
     stem = stem.strip().strip(".") or "小说"
     return f"{stem[:60]}.txt"
+
+
+def _probe_error(exc: ProviderError, api_key: str) -> str:
+    known = {
+        "auth": "密钥不对，或这个账号没有调用权限。",
+        "model_not_found": "找不到这个模型。",
+        "timeout": "模型没有在时间内应答。",
+        "stream_idle": "模型没有在时间内应答。",
+        "stream_interrupted": "模型应答中断了。",
+        "rate_limit": "调用太频繁，过一会儿再检测。",
+        "unavailable": "模型服务暂时不可用。",
+    }
+    text = known.get(exc.kind)
+    if text:
+        return text
+    detail = _short(exc)
+    if api_key:
+        detail = detail.replace(api_key, "····")
+    return detail or "检测没有通过。"
 
 
 def _model_label(status: dict) -> str:
