@@ -66,6 +66,59 @@ def test_short_synopsis_borrows_the_premise(tmp_path: Path):
     assert card["note"] == ""
 
 
+def test_listing_follows_the_written_chapter(tmp_path: Path):
+    root = tmp_path / "book"
+    (root / "meta").mkdir(parents=True)
+    (root / "chapters").mkdir()
+    (root / "meta" / "book.json").write_text(
+        json.dumps(
+            {
+                "title": "海浪下的回声",
+                "synopsis": "她一次次潜入海浪之下，发现一场被全村掩盖的沉船事故。随着潮汐逼近，她必须在寻找证据与保护家人之间抉择。",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (root / "meta" / "progress.json").write_text(
+        json.dumps({"completed_chapters": [1]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (root / "outline.json").write_text(
+        json.dumps(
+            [
+                {
+                    "chapter": 1,
+                    "title": "捡贝壳",
+                    "summary": "十六岁的林雾在退潮后捡贝壳，父亲失踪前许诺带她找一枚会唱歌的海螺。她把捡到的温热贝壳贴在耳边，听见父亲的呼救。",
+                },
+                {
+                    "chapter": 2,
+                    "title": "沉船",
+                    "summary": "她潜入海底，发现被全村掩盖的沉船。",
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    body = "退潮后的沙滩很凉。村里人都说，林雾又去捡贝壳了。他们不知道，我是在等一枚海螺。父亲失踪前，他说下次退潮带我去找会唱歌的海螺。他的船在台风后没有回来。我捡到一枚温热的贝壳，里面传来他的呼救。"
+    (root / "chapters" / "01.md").write_text(f"# 我在海浪下捡贝壳\n\n{body}\n", encoding="utf-8")
+    card = build_listing(root)
+    assert card["synopsis"] == "林雾在退潮后捡贝壳，父亲失踪前许诺带她找一枚会唱歌的海螺。她把捡到的温热贝壳贴在耳边，听见父亲的呼救。"
+    assert "十六岁" not in card["synopsis"]
+    assert "沉船" not in card["synopsis"]
+    assert "潜入" not in card["synopsis"]
+    assert "塑料桶" not in card["synopsis"]
+    assert card["protagonists"] == ["林雾"]
+    assert card["audience"] == "女频"
+    assert card["reading_tag"] == "悬疑"
+    assert card["content_tag"] == "悬疑脑洞"
+    assert "林雾" in card["cover_prompt"]
+    assert "玄幻" not in card["cover_prompt"]
+    assert "螺壳" in card["cover_prompt"]
+
+
 def test_listing_intent_does_not_need_a_model(tmp_path: Path):
     root = tmp_path / "book"
     (root / "meta").mkdir(parents=True)
