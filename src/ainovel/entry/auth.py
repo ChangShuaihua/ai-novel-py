@@ -130,7 +130,14 @@ class AuthStore:
             user = _find_id(self._load(), str(payload.get("sub") or ""))
             if user is None or int(payload.get("ver") or 0) != int(user["generation"]):
                 raise AuthError("先登录。", 401)
-            return {"id": user["id"], "username": user["username"]}
+            return {
+                "id": user["id"],
+                "username": user["username"],
+                "salt": user["salt"],
+                "hash": user["hash"],
+                "n": user["n"],
+                "generation": user["generation"],
+            }
 
     def change_password(self, access_token: str, current: str, username: str, password: str) -> Tokens:
         secret = clean_password(password)

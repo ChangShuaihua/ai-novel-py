@@ -9,7 +9,21 @@ from typing import Any
 
 
 class ReadOnlyError(PermissionError):
-    """这份打开是只读的。诊断和导出不能写回。别的打开仍可写。"""
+    """这份打开是只读的。导出不能写回。别的打开仍可写。"""
+
+
+_WRITE_HOOKS: list = []
+
+
+def add_write_hook(hook) -> None:
+    """写完一个相对路径后通知。kind 为 write、append 或 remove。"""
+    if hook not in _WRITE_HOOKS:
+        _WRITE_HOOKS.append(hook)
+
+
+def _emit(root: Path, relative: str, kind: str) -> None:
+    for hook in list(_WRITE_HOOKS):
+        hook(root, relative, kind)
 
 
 class IO:
@@ -52,6 +66,7 @@ class IO:
     def write_bytes_unlocked(self, relative: str, data: bytes) -> None:
         self._refuse_when_readonly()
         atomic_replace(self.path(relative), data)
+        _emit(self.root, relative, "write")
 
     def write_json(self, relative: str, payload: Any) -> None:
         with self._lock:
@@ -77,6 +92,7 @@ class IO:
             handle.write(line)
             handle.flush()
             os.fsync(handle.fileno())
+        _emit(self.root, relative, "append")
 
     def remove(self, relative: str) -> None:
         with self._lock:
@@ -88,6 +104,7 @@ class IO:
             self.path(relative).unlink()
         except FileNotFoundError:
             return
+        _emit(self.root, relative, "remove")
 
 
 def atomic_replace(path: Path, data: bytes) -> None:

@@ -64,6 +64,7 @@ CREATE TABLE books (
   hook_history JSON NULL,
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
+  trashed_at DATETIME(6) NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_books_user_path (user_id, root_path_hash),
   KEY idx_books_shelf (user_id, shelf_state),
@@ -202,3 +203,13 @@ CREATE TABLE book_signals (
   )),
   CONSTRAINT chk_book_signals_seq CHECK (seq >= 1)
 ) ENGINE=InnoDB COMMENT='时间线、伏笔、关系、状态变化、大纲反馈';
+
+CREATE TABLE IF NOT EXISTS book_files (
+  book_id BIGINT UNSIGNED NOT NULL,
+  relative_path VARCHAR(512) NOT NULL,
+  body LONGBLOB NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (book_id, relative_path),
+  CONSTRAINT fk_book_files_book
+    FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE
+) ENGINE=InnoDB COMMENT='书里的文件。网页新建的书整本存在这里';

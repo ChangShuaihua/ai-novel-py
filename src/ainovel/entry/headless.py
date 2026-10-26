@@ -40,9 +40,6 @@ def main(argv: list[str] | None = None) -> int:
     nxt = commands.add_parser("next")
     nxt.add_argument("directory")
 
-    diag = commands.add_parser("diag")
-    diag.add_argument("directory")
-
     export = commands.add_parser("export")
     export.add_argument("directory")
     export.add_argument("dest")
@@ -65,11 +62,6 @@ def main(argv: list[str] | None = None) -> int:
     import_book.add_argument("--yes", action="store_true")
 
     args = parser.parse_args(argv)
-    if args.command == "diag":
-        from ainovel.diag import diagnose, render_diagnosis
-
-        print(render_diagnosis(diagnose(args.directory)))
-        return 0
     if args.command == "export":
         from ainovel.exporting import export_txt
 

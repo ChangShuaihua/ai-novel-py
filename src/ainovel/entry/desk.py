@@ -7,13 +7,16 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from ainovel.diag import diagnose
+from ainovel.entry.catalog import CatalogError
+from ainovel.entry.spine_cache import load_spines, store_spines
+from ainovel.entry.guide import GuideError, begin as guide_begin, confirm as guide_confirm, load_guide, revise as guide_revise
 from ainovel.exporting import export_txt
+from ainovel.llm.policy import RoleClient
+from ainovel.llm.types import ModelRef, RoleModel
 from ainovel.host.config import ConfigError, config_dir, describe_model, load_config, store_config
 from ainovel.host.host import Host, HostError
 from ainovel.llm.errors import ProviderError
 from ainovel.llm.litellm_client import LiteLLMTransport
-from ainovel.llm.types import ModelRef
 from ainovel.host.snapshot import build_snapshot, has_progress, shelf_row
 from ainovel.importers.pipeline import ImportError, accept_segmentation, ingest, run
 from ainovel.listing import build_listing
@@ -48,10 +51,12 @@ class Desk:
         completer_factory=None,
         picker=None,
         save_picker=None,
+        catalog=None,
     ) -> None:
         self._library_path = library_path or (config_dir() / "library.json")
         self._config_path = config_path
         self._books_root = books_root or (config_dir() / "books")
+        self._bookdb = catalog
         self._completer_factory = completer_factory
         self._picker = picker
         self._save_picker = save_picker
@@ -64,7 +69,6 @@ class Desk:
         self._running = False
         self._error = ""
         self._queued_steer = ""
-        self._reports: dict[str, dict] = {}
         self._exported: dict[str, str] = {}
         self._listings: dict[str, dict] = {}
         self._drop_host_when_idle = False
@@ -114,8 +118,36 @@ class Desk:
         return str(config_dir())
 
     def library(self) -> dict:
-        directories, trash = self._catalog()
         status = self.model_settings()
+        if self._bookdb is not None and getattr(self._bookdb, "shelf_spines", None) is not None:
+            books, trash = self._cached_spines()
+            return {
+                "config_ready": status["ready"],
+                "config_dir": status["config_dir"],
+                "model_label": status["model_label"],
+                "books": books,
+                "trash": trash,
+            }
+        if self._bookdb is not None:
+            directories, trash = self._catalog_call(self._bookdb.shelves)
+            deadlines = {}
+            marks = getattr(self._bookdb, "trash_deadlines", None)
+            if marks is not None:
+                deadlines = self._catalog_call(marks)
+            discarded = []
+            for item in trash:
+                row = self._shelf(self._open_saved(item), public=item)
+                if item in deadlines:
+                    row["purge_at"] = deadlines[item]
+                discarded.append(row)
+            return {
+                "config_ready": status["ready"],
+                "config_dir": status["config_dir"],
+                "model_label": status["model_label"],
+                "books": [self._shelf(self._open_saved(item), public=item) for item in directories],
+                "trash": discarded,
+            }
+        directories, trash = self._catalog()
         return {
             "config_ready": status["ready"],
             "config_dir": status["config_dir"],
@@ -224,6 +256,8 @@ class Desk:
         return {"path": str(target.resolve()), "cancelled": False}
 
     def attach(self, directory: str) -> dict:
+        if self._bookdb is not None:
+            raise DeskError("新书记在数据库里，不用选目录")
         root = self._existing_directory(directory)
         self._remember(root)
         row = self._shelf(root)
@@ -231,6 +265,12 @@ class Desk:
         return row
 
     def discard(self, directory: str) -> dict:
+        if self._bookdb is not None:
+            root = self._existing_directory(directory)
+            if self._busy(root):
+                raise DeskError("这本书还在写或被占用，不能丢进废纸篓")
+            self._catalog_call(lambda: self._bookdb.discard(directory))
+            return self.library()
         root = self._existing_directory(directory)
         if self._busy(root):
             raise DeskError("这本书还在写或被占用，不能丢进废纸篓")
@@ -248,6 +288,9 @@ class Desk:
         return self.library()
 
     def restore(self, directory: str) -> dict:
+        if self._bookdb is not None:
+            self._catalog_call(lambda: self._bookdb.restore(directory))
+            return self.library()
         root = self._existing_directory(directory)
         resolved = str(root)
 
@@ -263,6 +306,13 @@ class Desk:
         return self.library()
 
     def empty_trash(self) -> dict:
+        if self._bookdb is not None:
+            _, trash = self._catalog_call(self._bookdb.shelves)
+            for item in trash:
+                if self._busy(self._open_saved(item)):
+                    raise DeskError("废纸篓里还有正在写或被占用的书，不能清空")
+            self._catalog_call(self._bookdb.empty_trash)
+            return self.library()
         _, trash = self._catalog()
         for item in trash:
             if self._busy(Path(item)):
@@ -282,14 +332,20 @@ class Desk:
         if not directory:
             raise DeskError("缺少书目录")
         root = self._existing_directory(directory)
-        if action == "diag":
-            return self._diag(root)
         if action == "export":
             return self._export(root, str(payload.get("dest") or ""))
         if action == "listing":
             return self._listing(root)
         if action == "abort":
             return self._abort(root)
+        if load_guide(root) is not None and action in {"resume", "steer", "next", "review_on", "review_off", "import", "import_confirm"}:
+            snap = self._snapshot(root)
+            snap["error"] = "先确认当前这一步。"
+            return snap
+        if action == "guide_confirm":
+            return self._guide_call(root, lambda: guide_confirm(root, payload, self._model_text))
+        if action == "guide_revise":
+            return self._guide_call(root, lambda: guide_revise(root, payload, self._model_text))
         if action in ("review_on", "review_off"):
             return self._review(root, "review" if action == "review_on" else "auto")
         if action in ("resume", "steer", "next", "import", "import_confirm"):
@@ -307,22 +363,35 @@ class Desk:
         self._close_host()
 
     def _start(self, payload: dict) -> dict:
-        requirement = str(payload.get("requirement") or "").strip()
+        title = str(payload.get("title") or "").strip()[:24]
+        synopsis = str(payload.get("synopsis") or "").strip()[:1000]
+        requirement = str(payload.get("requirement") or "").strip() or synopsis or title
         if not requirement:
-            raise DeskError("先写下一句话需求")
+            raise DeskError("先写下标题、简介，或要写的内容")
         if not self.config_ready():
             raise DeskError(_MISSING_MODEL)
         raw = str(payload.get("directory") or "").strip()
-        if raw:
+        if self._bookdb is not None:
+            try:
+                root = self._bookdb.workspace(raw) if raw else self._bookdb.create(requirement)
+            except CatalogError as exc:
+                raise DeskError(str(exc)) from exc
+        elif raw:
             root = Path(raw).expanduser().resolve()
             root.mkdir(parents=True, exist_ok=True)
         else:
             root = self._allocate()
         if has_progress(root):
-            self._remember(root)
+            if self._bookdb is None:
+                self._remember(root)
             snap = self._snapshot(root)
             snap["error"] = "这本已经有进度。回到写作现场，用继续。"
             return snap
+        if self._bookdb is not None:
+            return self._guide_call(
+                root,
+                lambda: guide_begin(root, requirement, self._model_text, title=title, synopsis=synopsis),
+            )
         self._remember(root)
         return self._submit(root, "start", {"requirement": requirement})
 
@@ -399,6 +468,11 @@ class Desk:
             if text and host is not None:
                 self._keep_steer(host, text)
         finally:
+            if self._bookdb is not None:
+                try:
+                    self._bookdb.sync_tree(root)
+                except CatalogError:
+                    logger.exception("写回数据库失败")
             with self._guard:
                 self._running = False
             self._retire_host_if_stale()
@@ -463,18 +537,7 @@ class Desk:
             snap = self._snapshot(root)
             snap["error"] = _short(exc)
             return snap
-        return self._snapshot(root)
-
-    def _diag(self, root: Path) -> dict:
-        try:
-            report = diagnose(root)
-        except (OSError, ValueError, TypeError) as exc:
-            logger.exception("诊断失败")
-            snap = self._snapshot(root)
-            snap["error"] = _short(exc)
-            return snap
-        with self._guard:
-            self._reports[str(root)] = report
+        self._note_book(root)
         return self._snapshot(root)
 
     def _listing(self, root: Path) -> dict:
@@ -549,13 +612,12 @@ class Desk:
     def _snapshot_unlocked(self, root: Path) -> dict:
         live = self._host if self._active == root else None
         engine = live.engine if live is not None else None
-        diag = self._reports.get(str(root), {})
         latest = engine.latest_instruction if engine is not None else None
         usage = getattr(engine, "context_usage", None) if engine is not None else None
         if usage is not None:
             usage = str(usage)
         try:
-            return build_snapshot(
+            snap = build_snapshot(
                 root,
                 book=live.book if live is not None else None,
                 running=self._running and self._active == root,
@@ -569,15 +631,14 @@ class Desk:
                 locked=self._locked_unlocked(root),
                 config_ready=self.config_ready(),
                 config_dir=self.config_directory(),
-                findings=diag.get("findings") or [],
-                skeleton=diag.get("skeleton") or [],
                 exported_path=self._exported.get(str(root), ""),
                 listing=self._listings.get(str(root)),
                 context_usage=usage,
             )
+            return self._publish(root, snap)
         except Exception as exc:
             logger.exception("读取快照失败")
-            return {
+            failed = {
                 "directory": str(root),
                 "title": "",
                 "phase": "",
@@ -608,18 +669,70 @@ class Desk:
                 "import_status": "",
                 "import_detail": "",
                 "import_chapters": [],
-                "findings": [],
-                "skeleton": [],
                 "exported_path": "",
                 "listing": self._listings.get(str(root)),
                 "error": _short(exc),
                 "has_progress": False,
             }
+            return self._publish(root, failed)
 
-    def _shelf(self, root: Path) -> dict:
+    def _publish(self, root: Path, snap: dict) -> dict:
+        guide = load_guide(root)
+        if guide is not None:
+            snap["guide"] = guide
+        if self._bookdb is None:
+            return snap
+        public = self._bookdb.public_for(root)
+        if public:
+            snap["directory"] = public
+            snap["lock_path"] = ""
+        return snap
+
+    def _cached_spines(self) -> tuple[list[dict], list[dict]]:
+        user_id = str(getattr(self._bookdb, "user_id", "") or "")
+        if user_id:
+            cached = load_spines(user_id)
+            if cached is not None:
+                return self._lock_rows(cached["books"]), self._lock_rows(cached["trash"])
+        books, trash = self._catalog_call(self._bookdb.shelf_spines)
+        if user_id:
+            store_spines(user_id, books, trash)
+        return self._lock_rows(books), self._lock_rows(trash)
+
+    def _lock_rows(self, rows: list[dict]) -> list[dict]:
+        marked = []
+        for row in rows:
+            item = dict(row)
+            item["locked"] = self._row_locked(str(item.get("directory") or ""))
+            item["lock_path"] = ""
+            marked.append(item)
+        return marked
+
+    def _row_locked(self, public: str) -> bool:
+        finder = getattr(self._bookdb, "local_root", None)
+        if finder is None or not public:
+            return False
+        try:
+            root = Path(finder(public))
+        except (CatalogError, OSError, TypeError, ValueError):
+            return False
+        with self._guard:
+            return self._locked_unlocked(root)
+
+    def _catalog_call(self, fn):
+        try:
+            return fn()
+        except CatalogError as exc:
+            raise DeskError(str(exc)) from exc
+
+    def _shelf(self, root: Path, public: str = "") -> dict:
         with self._guard:
             locked = self._locked_unlocked(root)
-        return shelf_row(root, locked=locked, lock_path=str(root / ".ainovel.lock"))
+        row = shelf_row(root, locked=locked, lock_path=str(root / ".ainovel.lock"))
+        if public:
+            row["directory"] = public
+            row["lock_path"] = ""
+        return row
 
     def _locked_unlocked(self, root: Path) -> bool:
         if not (root / ".ainovel.lock").exists():
@@ -655,6 +768,66 @@ class Desk:
         except (OSError, ValueError, TypeError):
             return False
         return bool(meta is not None and meta.pending_steer)
+
+    def _guide_call(self, root: Path, work) -> dict:
+        with self._guard:
+            if self._running:
+                snap = self._snapshot_unlocked(root)
+                snap["error"] = "引擎还在跑。"
+                return snap
+            self._running = True
+            self._active = root
+            self._error = ""
+        try:
+            work()
+        except GuideError as exc:
+            with self._guard:
+                self._error = str(exc)
+        except Exception as exc:
+            logger.exception("确认流程失败")
+            with self._guard:
+                self._error = _short(exc)
+        finally:
+            with self._guard:
+                self._running = False
+            self._note_book(root)
+        return self._snapshot(root)
+
+    def _note_book(self, root: Path) -> None:
+        if self._bookdb is None:
+            return
+        note = getattr(self._bookdb, "touch", None)
+        if note is None:
+            return
+        try:
+            note(root)
+        except CatalogError:
+            logger.exception("写回书脊失败")
+
+    def _model_text(self, messages: list[dict]) -> str:
+        client = self._completer()
+        try:
+            result = client.complete(messages, [])
+        except TypeError:
+            try:
+                config = load_config(self._config_file())
+            except ConfigError as exc:
+                raise GuideError(str(exc)) from exc
+            result = RoleClient(
+                RoleModel(
+                    primary=ModelRef(
+                        provider=config.provider,
+                        model=config.model,
+                        api_key=config.api_key,
+                        api_base=config.api_base,
+                    )
+                ),
+                client,
+            ).complete(messages, [])
+        text = str(getattr(result, "content", "") or "").strip()
+        if not text:
+            raise GuideError("模型没有返回内容")
+        return text
 
     def _completer(self):
         if self._completer_factory is not None:
@@ -731,7 +904,12 @@ class Desk:
         root.mkdir()
         return root
 
+    def _open_saved(self, public: str) -> Path:
+        return self._catalog_call(lambda: self._bookdb.workspace(public))
+
     def _existing_directory(self, directory: str) -> Path:
+        if self._bookdb is not None:
+            return self._open_saved(directory)
         root = Path(directory).expanduser().resolve()
         if not root.is_dir():
             raise DeskError(f"找不到书目录：{root}")

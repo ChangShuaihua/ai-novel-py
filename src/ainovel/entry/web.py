@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ainovel.entry.auth import AuthError, AuthStore, Tokens, read_cookie
+from ainovel.entry.catalog import CatalogError, open_catalog
 from ainovel.entry.desk import Desk, DeskError
 
 logger = logging.getLogger(__name__)
@@ -24,17 +25,22 @@ class Accounts:
         self._lock = threading.Lock()
         self._desks: dict[str, Desk] = {}
 
-    def desk_for(self, user_id: str) -> Desk:
+    def desk_for(self, user: dict | str) -> Desk:
+        user_id = str(user.get("id") if isinstance(user, dict) else user)
         if not user_id.isalnum():
             raise DeskError("先登录。")
         with self._lock:
             desk = self._desks.get(user_id)
             if desk is None:
                 home = self.root / "accounts" / user_id
+                catalog = None
+                if isinstance(user, dict):
+                    catalog = open_catalog(user)
                 desk = Desk(
                     library_path=home / "library.json",
                     config_path=home / "config.json",
                     books_root=home / "books",
+                    catalog=catalog,
                 )
                 self._desks[user_id] = desk
             return desk
@@ -97,7 +103,10 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
                 if desk is None:
                     return
                 if parsed.path == "/api/library":
-                    self._send(200, desk.library())
+                    try:
+                        self._send(200, desk.library())
+                    except DeskError as exc:
+                        self._send(503, {"error": str(exc)})
                     return
                 if parsed.path == "/api/model":
                     self._send(200, self._owned(desk.model_settings()))
@@ -290,7 +299,10 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
                 return None
             self._account = user
             try:
-                return accounts.desk_for(user["id"])
+                return accounts.desk_for(user)
+            except CatalogError as exc:
+                self._send(503, {"error": str(exc)})
+                return None
             except DeskError as exc:
                 self._send(401, {"error": str(exc)})
                 return None

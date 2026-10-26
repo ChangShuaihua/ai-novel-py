@@ -145,14 +145,10 @@ def test_missing_config_blocks_resume_without_calling_a_model(tmp_path: Path):
     assert snap["running"] is False
 
 
-def test_diag_and_export_work_without_config(tmp_path: Path):
+def test_export_works_without_config(tmp_path: Path):
     root = tmp_path / "book"
     _book(root)
     desk = Desk(library_path=tmp_path / "library.json", config_path=tmp_path / "missing.json", books_root=tmp_path / "new")
-    diagnosed = desk.intent({"action": "diag", "directory": str(root)})
-    assert diagnosed["config_ready"] is False
-    assert diagnosed["error"] == ""
-    assert any(item["rule"] == "MissingChapter" for item in diagnosed["findings"]) is False
     exported = desk.intent({"action": "export", "directory": str(root), "dest": str(tmp_path / "out.txt")})
     text = Path(exported["exported_path"]).read_text(encoding="utf-8")
     assert text.index("雨") < text.index("第一章正文")

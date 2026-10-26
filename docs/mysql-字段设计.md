@@ -4,7 +4,7 @@
 
 MySQL 8，存储引擎 InnoDB，字符集 `utf8mb4`，排序规则 `utf8mb4_0900_ai_ci`。时间用 `DATETIME(6)`，存 UTC。
 
-这份设计只覆盖账号、书架和写作状态。章节正文、草稿、审阅稿和可重建的 Markdown 投影仍留在书目录里，表中只记相对路径。收藏星标留在浏览器，不建表。登录失败次数留在进程内存，不建表。
+网页新建的书不选目录。`books.root_path` 写成 `db:<书籍 id>`，章节、草稿、设定和审阅的文件字节写在 `book_files`。收藏星标留在浏览器，不建表。登录失败次数留在进程内存，不建表。
 
 命令行和网页可以共用这些表。区别只在写入时的 `user_id`：网页用登录账号，命令行用它自己的账号行。
 
@@ -97,8 +97,9 @@ MySQL 8，存储引擎 InnoDB，字符集 `utf8mb4`，排序规则 `utf8mb4_0900
 | `hook_history` | `JSON` | 是 | | 按章的章末钩子类型 |
 | `created_at` | `DATETIME(6)` | 否 | | 首次登记到书架 |
 | `updated_at` | `DATETIME(6)` | 否 | | 进度或书名变化时更新 |
+| `trashed_at` | `DATETIME(6)` | 是 | | 放进废纸篓的时间。拣回书架后清空 |
 
-放进废纸篓只把 `shelf_state` 改成 `trash`。清空废纸篓删除这些行，不删除 `root_path` 指向的目录。
+放进废纸篓把 `shelf_state` 改成 `trash`，并写下 `trashed_at`。这本书不再出现在书架上。满三天，或手动清空废纸篓，会删除这些行；文件行随外键一起删掉。拣回书架会清掉 `trashed_at`。
 
 ## book_runs
 
@@ -221,14 +222,19 @@ MySQL 8，存储引擎 InnoDB，字符集 `utf8mb4`，排序规则 `utf8mb4_0900
 | `body` | `JSON` | 否 | | 原来 jsonl 的那一行对象 |
 | `created_at` | `DATETIME(6)` | 否 | | |
 
-## 仍留在书目录、不建表
+## book_files
 
-这些文件要么是正文，要么能从上面的表重建：
+网页新建的书，原来会落在书目录里的文件改存在这里。一行一个相对路径，正文和草稿都算。
 
-- `chapters/NN.md`、`drafts/NN.draft.md`、`drafts/NN.plan.json`
-- `summaries/`、`reviews/`
-- `book.md`、`premise.md`、`characters.md`、`timeline.md`
-- `style/` 下的本书文风覆盖
-- `.ainovel.lock`
+| 字段 | 类型 | 空 | 键 | 说明 |
+| --- | --- | --- | --- | --- |
+| `book_id` | `BIGINT UNSIGNED` | 否 | 主键，外键 → `books.id` | |
+| `relative_path` | `VARCHAR(512)` | 否 | 主键 | 如 `chapters/01.md`、`meta/progress.json` |
+| `body` | `LONGBLOB` | 否 | | 文件字节 |
+| `updated_at` | `DATETIME(6)` | 否 | | |
 
-`chapters.relative_path` 和检查点的 `artifact` 指向这些文件。
+`.ainovel.lock` 不入库。废纸篓里的书满三天，或手动清空时，会删掉 `books` 行，文件行随外键一起删掉。
+
+## 命令行仍可使用书目录
+
+命令行打开的仍是本机目录，不经过 `book_files`。`chapters.relative_path` 和检查点的 `artifact` 继续记相对路径，网页上的那份字节在 `book_files.body`。

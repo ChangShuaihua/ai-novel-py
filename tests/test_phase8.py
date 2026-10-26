@@ -1,4 +1,4 @@
-"""阶段 8：导入、导出、诊断、评测和只订阅事件的界面。"""
+"""阶段 8：导入、导出、评测和只订阅事件的界面。"""
 
 import json
 import shutil
@@ -8,7 +8,6 @@ import pytest
 
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
-from ainovel.entry.headless import main
 from ainovel.entry.tui import format_events
 from ainovel.evalrun import compare_styles, replay_decisions
 from ainovel.exporting import export_txt
@@ -16,7 +15,6 @@ from ainovel.host.host import Host
 from ainovel.importers.pipeline import accept_segmentation, ingest, run
 from ainovel.llm.types import Completion
 from ainovel.store.book import Book
-from ainovel.store.io import ReadOnlyError
 from ainovel.tools import call_tool
 
 
@@ -89,32 +87,15 @@ def test_txt_export_follows_completed_chapter_order(tmp_path: Path):
     assert (root / "meta" / "progress.json").read_bytes() == before
 
 
-def test_diag_and_export_leave_a_live_book_writable(tmp_path: Path):
+def test_export_leaves_a_live_book_writable(tmp_path: Path):
     root = tmp_path / "book"
     live = Book.open(root, writable=True)
     live.progress.save(Progress(phase=Phase.WRITING, flow=FlowState.WRITING, total_chapters=1, completed_chapters=[1]))
     (root / "chapters").mkdir()
     (root / "chapters" / "01.md").write_text("第一章还在写。\n", encoding="utf-8")
-    assert main(["diag", str(root)]) == 0
     export_txt(root, tmp_path / "out.txt")
     live.progress.save(Progress(phase=Phase.WRITING, flow=FlowState.WRITING, total_chapters=1, completed_chapters=[1], current_chapter=1))
     assert live.progress.load().current_chapter == 1
-
-
-def test_diag_opens_readonly(tmp_path: Path):
-    root = tmp_path / "book"
-    book = Book.open(root, writable=True)
-    book.progress.save(Progress(phase=Phase.WRITING, flow=FlowState.WRITING, total_chapters=1, completed_chapters=[1]))
-    (root / "chapters").mkdir()
-    (root / "chapters" / "01.md").write_text("某种程度上，他推开了门。\n", encoding="utf-8")
-    before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
-    assert main(["diag", str(root)]) == 0
-    after = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
-    assert after == before
-    opened = Book.open(root, writable=False)
-    assert opened.writable is False
-    with pytest.raises(ReadOnlyError):
-        opened.progress.save(Progress(phase=Phase.COMPLETE))
 
 
 def test_go_book_round_trip_on_a_copy(tmp_path: Path):
