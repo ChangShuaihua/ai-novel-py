@@ -107,3 +107,11 @@ test("没有进度时不提供继续", () => {
   assert.equal(state.id, "empty")
   assert.equal(state.primary, null)
 })
+
+test("题目确认挡住自动推进", () => {
+  const state = deskState(snap({ guide: { stage: "title", title: "雨夜", chapter: 0 } }))
+  assert.equal(state.id, "guide")
+  assert.equal(state.primary, null)
+  assert.equal(blocks(state, "resume"), true)
+  assert.match(state.sentence, /确认或改完/)
+})

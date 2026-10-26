@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 let accessToken = ""
 let currentName = ""
@@ -206,38 +206,57 @@ export function sendIntent(payload) {
 export function useSnapshot(directory) {
   const [snapshot, setSnapshot] = useState(null)
   const [loadError, setLoadError] = useState("")
+  const serial = useRef(0)
+  const packed = useRef("")
+
+  const apply = useCallback((next) => {
+    serial.current += 1
+    packed.current = JSON.stringify(next)
+    setSnapshot(next)
+    setLoadError("")
+  }, [])
 
   const refresh = useCallback(async () => {
     if (!directory) return null
     const next = await getSnapshot(directory)
-    setSnapshot(next)
-    setLoadError("")
+    apply(next)
     return next
-  }, [directory])
+  }, [directory, apply])
 
   useEffect(() => {
     if (!directory) return undefined
     let stop = false
+    let timer = 0
     async function tick() {
+      const mine = serial.current
+      let wait = 4000
       try {
         const next = await getSnapshot(directory)
-        if (!stop) {
+        if (stop || mine !== serial.current) {
+          wait = 1000
+          return
+        }
+        wait = next.running ? 1000 : 4000
+        const body = JSON.stringify(next)
+        if (body !== packed.current) {
+          packed.current = body
           setSnapshot(next)
           setLoadError("")
         }
       } catch (error) {
-        if (!stop) setLoadError(error.message)
+        if (!stop && mine === serial.current) setLoadError(error.message)
+      } finally {
+        if (!stop) timer = window.setTimeout(tick, wait)
       }
     }
     tick()
-    const id = window.setInterval(tick, 1000)
     return () => {
       stop = true
-      window.clearInterval(id)
+      window.clearTimeout(timer)
     }
   }, [directory])
 
-  return { snapshot, loadError, setSnapshot, refresh }
+  return { snapshot, loadError, setSnapshot: apply, refresh }
 }
 
 export function bookHref(path, directory) {

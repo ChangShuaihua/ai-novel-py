@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 
 import { logout, restoreSession } from "./api.js"
 import { Login, PasswordScreen } from "./gate.jsx"
-import { DeskScreen, DiagScreen, ImportScreen, ListingScreen, ModelScreen, NewBook, Reader, Shelf } from "./screens.jsx"
+import { DeskScreen, ImportScreen, ListingScreen, ModelScreen, NewBook, Reader, Shelf } from "./screens.jsx"
 
 const SCREEN = {
   "/": "书架",
@@ -11,7 +11,6 @@ const SCREEN = {
   "/desk": "写作现场",
   "/read": "章节阅读",
   "/import": "导入确认",
-  "/diag": "诊断与导出",
   "/listing": "投稿资料",
   "/pass": "改密码",
 }
@@ -27,8 +26,12 @@ export function App() {
 function Studio({ onLeave }) {
   const route = useRoute()
   if (route.path === "/") return <Shelf onLeave={onLeave} />
+  if (route.path === "/new") return <NewBook directory={route.directory} onLeave={onLeave} />
+  if (route.path === "/desk") return <DeskScreen directory={route.directory} onLeave={onLeave} />
+  if (route.path === "/model") return <ModelScreen onLeave={onLeave} />
+  const painted = route.path === "/read" || route.path === "/listing"
   return (
-    <div className="room">
+    <div className={painted ? "room painted" : "room"}>
       <Lintel here={SCREEN[route.path]}>
         <div className="appbar-actions">
           {route.path === "/model" ? null : <a className="appbar-model" href="#/model">接入模型</a>}
@@ -36,13 +39,9 @@ function Studio({ onLeave }) {
           <button type="button" className="appbar-leave" onClick={onLeave}>离开</button>
         </div>
       </Lintel>
-      {route.path === "/model" ? <ModelScreen /> : null}
       {route.path === "/pass" ? <PasswordScreen /> : null}
-      {route.path === "/new" ? <NewBook directory={route.directory} /> : null}
-      {route.path === "/desk" ? <DeskScreen directory={route.directory} /> : null}
       {route.path === "/read" ? <Reader directory={route.directory} /> : null}
       {route.path === "/import" ? <ImportScreen directory={route.directory} /> : null}
-      {route.path === "/diag" ? <DiagScreen directory={route.directory} /> : null}
       {route.path === "/listing" ? <ListingScreen directory={route.directory} /> : null}
     </div>
   )
@@ -111,7 +110,7 @@ function readRoute() {
   const raw = window.location.hash.replace(/^#/, "") || "/"
   const [path, query = ""] = raw.split("?")
   const params = new URLSearchParams(query)
-  const known = ["/", "/model", "/new", "/desk", "/read", "/import", "/diag", "/listing", "/pass"]
+  const known = ["/", "/model", "/new", "/desk", "/read", "/import", "/listing", "/pass"]
   return {
     path: known.includes(path) ? path : "/",
     directory: params.get("directory") || "",

@@ -17,6 +17,19 @@ export function deskState(snapshot) {
       ["start", "resume", "steer", "next", "import_confirm"],
     )
   }
+  if (snapshot.guide && snapshot.guide.stage) {
+    const stage = snapshot.guide.stage
+    const sentence = !snapshot.guide.title && stage === "title"
+      ? "先根据需求生成题目。"
+      : stage === "title"
+        ? "题目已经拟好。确认或改完，再生成大纲。"
+        : stage === "outline"
+          ? "大纲已经拟好。确认或改完，再写第一章。"
+          : stage === "done"
+            ? "大纲里的章节都确认过了。还可以改最后一章，或把要求交给模型。"
+            : `第 ${snapshot.guide.chapter} 章已经写好。可以改字后确认，或把要求交给模型。`
+    return view("guide", sentence, null, "", ["start", "resume", "steer", "next", "abort"])
+  }
   if (snapshot.locked) {
     return view(
       "locked",
