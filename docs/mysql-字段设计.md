@@ -31,7 +31,7 @@ MySQL 8，存储引擎 InnoDB，字符集 `utf8mb4`，排序规则 `utf8mb4_0900
 
 ## users
 
-对应 `~/.ainovel/users.json` 里的一条用户。密码只存 scrypt 摘要。
+登录账号写在这张表。密码只存 scrypt 摘要。本机若还有 `~/.ainovel/users.json`，第一次连接数据库时导入，然后把文件改名为 `users.json.imported`。
 
 | 字段 | 类型 | 空 | 键 | 说明 |
 | --- | --- | --- | --- | --- |

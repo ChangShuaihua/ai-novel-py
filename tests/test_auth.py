@@ -2,19 +2,23 @@
 
 import http.client
 import json
+import os
+import secrets
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
-from ainovel.entry.auth import AuthError, AuthStore
+from ainovel.entry.auth import AuthError, AuthStore, MemoryRecords
+from ainovel.entry.envfile import load_env
 from ainovel.entry.web import Accounts, _handler
 
 
 def _store(tmp_path: Path, **kwargs) -> AuthStore:
     options = {"attempts": 8, "window": 600, "access_ttl": 60, "refresh_ttl": 3600, "n": 2**10}
     options.update(kwargs)
+    options.setdefault("records", MemoryRecords())
     return AuthStore(tmp_path, **options)
 
 
@@ -25,7 +29,7 @@ def test_register_hides_the_password_and_issues_two_tokens(tmp_path: Path):
     assert tokens.access_token.count(".") == 2
     assert tokens.refresh_token.count(".") == 2
     assert tokens.access_token != tokens.refresh_token
-    stored = (tmp_path / "users.json").read_text(encoding="utf-8")
+    stored = json.dumps(store.records.users, ensure_ascii=False)
     assert "correct-horse" not in stored
     assert store.authenticate(tokens.access_token)["username"] == "夜里"
     with pytest.raises(AuthError):
@@ -41,6 +45,14 @@ def test_duplicate_name_and_short_password_are_refused(tmp_path: Path):
     with pytest.raises(AuthError, match="8") as short:
         store.register("新名", "short", "local")
     assert short.value.status == 400
+
+
+def test_newline_in_the_signing_key_still_verifies(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("ainovel.entry.auth.secrets.token_bytes", lambda size: b"\n" * size)
+    store = _store(tmp_path)
+    tokens = store.register("夜里", "correct-horse", "local")
+    assert store.authenticate(tokens.access_token)["username"] == "夜里"
+    assert (tmp_path / "jwt.secret").read_bytes() == b"\n" * 32
 
 
 def test_unsigned_token_is_rejected(tmp_path: Path):
@@ -161,10 +173,10 @@ def test_register_login_and_refresh_cookie(studio, tmp_path: Path):
     assert body["refresh_token"].count(".") == 2
     assert "HttpOnly" in set_cookie
     assert "Path=/api" in set_cookie
-    assert "correct-horse" not in (tmp_path / "users.json").read_text(encoding="utf-8")
+    assert not (tmp_path / "users.json").exists()
 
     library, listed, _ = _call(studio, "GET", "/api/library", token=body["access_token"])
-    assert library == 200
+    assert library == 200, listed
     assert json.loads(listed)["books"] == []
 
     refused, _, refused_cookie = _call(studio, "POST", "/api/login", {"username": "夜里", "password": "wrong-pass"})
@@ -223,8 +235,8 @@ def test_two_accounts_do_not_share_a_shelf(studio, tmp_path: Path):
     assert second_status == 200
     first = json.loads(first_payload)["access_token"]
     second = json.loads(second_payload)["access_token"]
-    attached, _, _ = _call(studio, "POST", "/api/library", {"directory": str(book)}, token=first)
-    assert attached == 200
+    attached, attached_body, _ = _call(studio, "POST", "/api/library", {"directory": str(book)}, token=first)
+    assert attached == 200, attached_body
     own, own_body, _ = _call(studio, "GET", "/api/library", token=first)
     other, other_body, _ = _call(studio, "GET", "/api/library", token=second)
     assert own == 200
@@ -267,3 +279,117 @@ def test_repeated_login_failures_get_a_pause(studio):
     status, payload, _ = _call(studio, "POST", "/api/login", {"username": "夜里", "password": "correct-horse"})
     assert status == 429
     assert "过一会儿" in payload.decode("utf-8")
+
+
+def test_register_and_imported_file_live_in_mysql(tmp_path: Path):
+    keys = (
+        "AINOVEL_MYSQL_HOST",
+        "AINOVEL_MYSQL_PORT",
+        "AINOVEL_MYSQL_USER",
+        "AINOVEL_MYSQL_PASSWORD",
+        "AINOVEL_MYSQL_DATABASE",
+    )
+    before = {key: os.environ.get(key) for key in keys}
+    load_env()
+    created: list[str] = []
+    try:
+        if not os.environ.get("AINOVEL_MYSQL_PASSWORD"):
+            pytest.skip("没有数据库配置")
+        from ainovel.entry.catalog import CatalogError, _connect, _ensure_schema, _now
+
+        try:
+            _ensure_schema()
+        except CatalogError as exc:
+            pytest.skip(str(exc))
+        name = "u" + secrets.token_hex(4)
+        memory = _store(tmp_path / "memory")
+        tokens = memory.register(name, "correct-horse", "local")
+        db_root = tmp_path / "db"
+        db_root.mkdir()
+        (db_root / "users.json").write_text(
+            json.dumps({"users": memory.records.users}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        created.append(tokens.user_id)
+        now = _now()
+        connection = _connect()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users
+                      (id, username, salt, password_hash, scrypt_n, generation, refresh_jti, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, %s)
+                    """,
+                    (tokens.user_id, name, b"0123456789abcdef", b"h" * 32, 1024, 1, now, now),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+        try:
+            store = AuthStore(db_root, n=2**10)
+            logged = store.login(name, "correct-horse", "local")
+        except AuthError as exc:
+            if exc.status == 500:
+                pytest.skip(str(exc))
+            raise
+        assert logged.user_id == tokens.user_id
+        assert not (db_root / "users.json").exists()
+        assert (db_root / "users.json.imported").is_file()
+        changed = store.change_password(logged.access_token, "correct-horse", "", "another-pass")
+        row = _user_row(tokens.user_id)
+        assert row["generation"] == 2
+        assert row["refresh_jti"]
+        assert b"another-pass" not in row["password_hash"]
+        assert b"correct-horse" not in row["salt"]
+        store.logout(changed.access_token, "")
+        assert _user_row(tokens.user_id)["generation"] == 3
+        assert _user_row(tokens.user_id)["refresh_jti"] is None
+
+        fresh_name = name + "b"
+        fresh = store.register(fresh_name, "another-pass", "local")
+        created.append(fresh.user_id)
+        fresh_row = _user_row(fresh.user_id)
+        assert fresh_row["username"] == fresh_name
+        assert len(fresh_row["password_hash"]) == 32
+        assert b"another-pass" not in fresh_row["password_hash"]
+        assert fresh_row["refresh_jti"]
+    finally:
+        for user_id in created:
+            _delete_login(user_id)
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _user_row(user_id: str) -> dict:
+    from ainovel.entry.catalog import _connect
+
+    connection = _connect()
+    try:
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT username, salt, password_hash, generation, refresh_jti FROM users WHERE id=%s",
+                (user_id,),
+            )
+            return cur.fetchone()
+    finally:
+        connection.close()
+
+
+def _delete_login(user_id: str) -> None:
+    try:
+        from ainovel.entry.catalog import _connect
+
+        connection = _connect()
+    except Exception:
+        return
+    try:
+        with connection.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id=%s", (user_id,))
+        connection.commit()
+    finally:
+        connection.close()

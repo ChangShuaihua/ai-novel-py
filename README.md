@@ -160,6 +160,32 @@ npm install
 npm run dev
 ```
 
-接口在 <http://127.0.0.1:8765>，页面在 <http://127.0.0.1:5173>。地址写在根目录 `.env` 和 `web/.env`，样例是 `.env.example`、`web/.env.example`。两边都用 `127.0.0.1`，刷新令牌的 cookie 才能带上。先登记或登录再进自己的书架。账号写在 `~/.ainovel/users.json`，密码只存散列。登录发出一对 JWT：访问令牌大约 15 分钟，放在内存里，请求带 `Authorization: Bearer`；刷新令牌大约 7 天，放在 HttpOnly cookie 里，也写在登录响应中。访问令牌过期后用刷新令牌换一对新的，旧的刷新令牌立即作废。改密码或离开会使已发出的令牌失效。每个人的书架和模型配置在 `~/.ainovel/accounts/` 下分开。命令行的 `start`、`resume` 仍由本机直接执行，不经过这道登录。
+接口在 <http://127.0.0.1:8765>，页面在 <http://127.0.0.1:5173>。地址写在根目录 `.env` 和 `web/.env`，样例是 `.env.example`、`web/.env.example`。两边都用 `127.0.0.1`，刷新令牌的 cookie 才能带上。先登记或登录再进自己的书架。账号写在数据库的 `users` 表，密码只存散列。本机若还有 `~/.ainovel/users.json`，第一次连接时导入。登录发出一对 JWT：访问令牌大约 15 分钟，放在内存里，请求带 `Authorization: Bearer`；刷新令牌大约 7 天，放在 HttpOnly cookie 里，也写在登录响应中。访问令牌过期后用刷新令牌换一对新的，旧的刷新令牌立即作废。改密码或离开会使已发出的令牌失效。每个人的书架和模型配置在 `~/.ainovel/accounts/` 下分开。命令行的 `start`、`resume` 仍由本机直接执行，不经过这道登录。
 
 `npm run build` 把页面写到 `web/dist`，由前端自己的静态服务托管，不放进 Python 包。
+
+## 更新仓库和服务器
+
+先在本机提交并推到 GitHub 的 `main`。`.env` 已被忽略。`tmp-deploy-ainovel.sh`、`tmp-port-probe.py` 和根目录的 `bg.png` 不要加入提交。
+
+```bash
+git add -u
+git commit -m "这次改动的原因"
+git push origin main
+```
+
+再到服务器拉取。这台机器直接 `git pull` 会在 HTTP/2 上失败，要指定 HTTP/1.1。分支没有设置上游，要写明 `origin main`。
+
+```bash
+ssh root@47.97.166.61
+cd /opt/ainovel
+git -c http.version=HTTP/1.1 pull origin main
+```
+
+代码打进镜像，只拉取不会换掉正在跑的页面和接口。拉取后重新构建并启动：
+
+```bash
+docker compose -p ainovel -f docker-compose.yml -f docker-compose.server.yml up -d --build
+```
+
+只改了 `web/` 时，在命令末尾加 `web`。只改了 Python 时加 `api`。两边都改了就用上面这条。MySQL 和账号数据在 Docker 卷里，这样重建不会清掉。页面在 <http://47.97.166.61:443>。

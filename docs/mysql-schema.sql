@@ -20,7 +20,7 @@ CREATE TABLE users (
   PRIMARY KEY (id),
   UNIQUE KEY uk_users_username (username),
   CONSTRAINT chk_users_generation CHECK (generation >= 1)
-) ENGINE=InnoDB COMMENT='账号。对应 users.json';
+) ENGINE=InnoDB COMMENT='账号。登录登记写在这里';
 
 CREATE TABLE model_configs (
   user_id CHAR(16) NOT NULL,
