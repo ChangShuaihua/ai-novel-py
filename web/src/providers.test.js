@@ -8,6 +8,7 @@ import {
   callName,
   modelForProvider,
   modelOptions,
+  providerBase,
   providerOptions,
 } from "./providers.js"
 
@@ -41,6 +42,14 @@ test("已保存但不在列表里的名字仍能选中", () => {
   const models = modelOptions("openai", "private-model")
   assert.equal(models[0].id, "private-model")
   assert.ok(models.some((item) => item.id === "gpt-4.1"))
+})
+
+test("每个预设都带可填写的接口地址", () => {
+  for (const provider of PROVIDERS) {
+    assert.match(provider.base, /^https:\/\//)
+  }
+  assert.equal(providerBase("deepseek"), "https://api.deepseek.com")
+  assert.equal(providerBase("missing"), "")
 })
 
 test("调用名由提供方和模型拼成", () => {

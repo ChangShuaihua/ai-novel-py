@@ -4,6 +4,7 @@ export const PROVIDERS = [
   {
     id: "deepseek",
     label: "DeepSeek",
+    base: "https://api.deepseek.com",
     models: [
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
       { id: "deepseek-chat", label: "DeepSeek Chat" },
@@ -14,6 +15,7 @@ export const PROVIDERS = [
   {
     id: "dashscope",
     label: "通义千问",
+    base: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     models: [
       { id: "qwen-max", label: "Qwen Max" },
       { id: "qwen-plus", label: "Qwen Plus" },
@@ -24,6 +26,7 @@ export const PROVIDERS = [
   {
     id: "moonshot",
     label: "Kimi",
+    base: "https://api.moonshot.cn/v1",
     models: [
       { id: "kimi-k2.5", label: "Kimi K2.5" },
       { id: "moonshot-v1-128k", label: "Moonshot 128K" },
@@ -34,6 +37,7 @@ export const PROVIDERS = [
   {
     id: "zai",
     label: "智谱",
+    base: "https://open.bigmodel.cn/api/paas/v4",
     models: [
       { id: "glm-4.7", label: "GLM-4.7" },
       { id: "glm-4.6", label: "GLM-4.6" },
@@ -44,6 +48,7 @@ export const PROVIDERS = [
   {
     id: "openai",
     label: "OpenAI",
+    base: "https://api.openai.com/v1",
     models: [
       { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
       { id: "gpt-6-luna", label: "GPT-6 Luna" },
@@ -54,6 +59,7 @@ export const PROVIDERS = [
   {
     id: "anthropic",
     label: "Anthropic",
+    base: "https://api.anthropic.com",
     models: [
       { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
       { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
@@ -64,6 +70,7 @@ export const PROVIDERS = [
   {
     id: "gemini",
     label: "Gemini",
+    base: "https://generativelanguage.googleapis.com/v1beta/openai",
     models: [
       { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
       { id: "gemini-flash-latest", label: "Gemini Flash" },
@@ -76,8 +83,12 @@ export const DEFAULT_PROVIDER = PROVIDERS[0].id
 export const DEFAULT_MODEL = PROVIDERS[0].models[0].id
 
 const PROVIDER_NOTES = {
-  moonshot: "国内账号把接口地址填成 https://api.moonshot.cn/v1。",
-  dashscope: "国内一般留空。国际站填 https://dashscope-intl.aliyuncs.com/compatible-mode/v1。",
+  moonshot: "国内账号用 https://api.moonshot.cn/v1。",
+  dashscope: "预设填的是国内兼容地址。国际站改成 https://dashscope-intl.aliyuncs.com/compatible-mode/v1。",
+}
+
+export function providerBase(provider) {
+  return PROVIDERS.find((item) => item.id === provider)?.base || ""
 }
 
 export function providerNote(provider) {

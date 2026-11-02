@@ -5,9 +5,11 @@ import { blocks, deskState } from "./deskState.js"
 import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
+  PROVIDERS,
   callName,
   modelForProvider,
   modelOptions,
+  providerBase,
   providerNote,
   providerOptions,
 } from "./providers.js"
@@ -568,35 +570,38 @@ const STYLE_OPTIONS = [
   ["suspense", "suspense"],
 ]
 
+const MODEL_LEDE = "配置你自己的大模型 API，绑定到你的账号，不影响其他账号。"
+
 export function ModelScreen({ onLeave }) {
+  const modelListId = useId()
   const [provider, setProvider] = useState(DEFAULT_PROVIDER)
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [apiKey, setApiKey] = useState("")
   const [apiBase, setApiBase] = useState("")
   const [style, setStyle] = useState("")
-  const [keySet, setKeySet] = useState(false)
-  const [keyHint, setKeyHint] = useState("")
-  const [clearKey, setClearKey] = useState(false)
+  const [preset, setPreset] = useState("")
+  const [saved, setSaved] = useState(blankBinding)
+  const [probe, setProbe] = useState(null)
+  const [confirmClear, setConfirmClear] = useState(false)
   const [loaded, setLoaded] = useState(false)
-  const [owner, setOwner] = useState("")
-  const [ready, setReady] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [checking, setChecking] = useState(false)
+  const [busy, setBusy] = useState("")
+  const [checkTarget, setCheckTarget] = useState("")
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
+
+  function remember(settings, ownerFallback = "") {
+    applySettings(settings, { setProvider, setModel, setApiBase, setStyle, setError })
+    setSaved(bindingFrom(settings, ownerFallback))
+    if (!settings.provider) setProvider(DEFAULT_PROVIDER)
+    if (!settings.model) setModel(modelForProvider(settings.provider || DEFAULT_PROVIDER, DEFAULT_MODEL))
+  }
 
   useEffect(() => {
     let stop = false
     getModel()
       .then((settings) => {
         if (stop) return
-        applySettings(settings, {
-          setProvider, setModel, setApiBase, setStyle, setKeySet, setKeyHint, setError,
-        })
-        setOwner(settings.username || "")
-        setReady(Boolean(settings.ready))
-        if (!settings.provider) setProvider(DEFAULT_PROVIDER)
-        if (!settings.model) setModel(modelForProvider(settings.provider || DEFAULT_PROVIDER, DEFAULT_MODEL))
+        remember(settings)
         setLoaded(true)
       })
       .catch((reason) => {
@@ -611,22 +616,34 @@ export function ModelScreen({ onLeave }) {
     }
   }, [])
 
-  function chooseProvider(event) {
+  function choosePreset(event) {
     const next = event.target.value
+    setPreset("")
+    setConfirmClear(false)
+    if (!next) return
+    const known = PROVIDERS.find((item) => item.id === next)
     setProvider(next)
-    setModel((current) => modelForProvider(next, current))
+    if (!known) return
+    setModel(known.models[0].id)
+    setApiBase(known.base)
+  }
+
+  function edit(setter) {
+    return (event) => {
+      setConfirmClear(false)
+      setter(event.target.value)
+    }
   }
 
   const providers = providerOptions(provider)
   const models = modelOptions(provider, model)
-  const note = providerNote(provider)
   const named = callName(provider, model)
   const styleOptions = STYLE_OPTIONS.some(([value]) => value === style) || !style
     ? STYLE_OPTIONS
     : [[style, style], ...STYLE_OPTIONS]
-  const keyNote = keySet
-    ? `${keyHint ? `已保存 ${keyHint}` : "已保存"}。留空则保持。`
-    : "留空时，调用层按该提供方的环境变量取密钥。"
+  const addressHint = [providerNote(provider), "需以 http:// 或 https:// 开头。留空则用该提供方的默认地址。"].filter(Boolean).join(" ")
+  const pending = Boolean(busy || checkTarget)
+  const canWrite = !pending && Boolean(provider.trim() && model.trim())
 
   function payload() {
     return {
@@ -635,105 +652,206 @@ export function ModelScreen({ onLeave }) {
       api_key: apiKey,
       api_base: apiBase.trim(),
       style,
-      clear_key: clearKey && !apiKey.trim(),
+      clear_key: false,
     }
   }
 
   async function submit(event) {
     event.preventDefault()
-    setBusy(true)
+    setBusy("save")
+    setConfirmClear(false)
     setError("")
     setNotice("")
     try {
-      const saved = await saveModel(payload())
-      applySettings(saved, {
-        setProvider, setModel, setApiBase, setStyle, setKeySet, setKeyHint, setError,
-      })
-      setOwner(saved.username || owner)
-      setReady(Boolean(saved.ready))
+      const next = await saveModel(payload())
+      remember(next, saved.owner)
       setApiKey("")
-      setClearKey(false)
-      const kept = saved.username ? `已保存到 ${saved.username} 的账号，离开后再进来还是这一份。` : "已保存到当前账号，离开后再进来还是这一份。"
-      setNotice(saved.live_stale ? `${kept}当前这次写作仍用原来的模型，结束后换上。` : kept)
+      setProbe(null)
+      const kept = next.username ? `已保存到 ${next.username} 的账号，离开后再进来还是这一份。` : "已保存到当前账号，离开后再进来还是这一份。"
+      setNotice(next.live_stale ? `${kept}当前这次写作仍用原来的模型，结束后换上。` : kept)
     } catch (reason) {
       setError(reason.message)
     } finally {
-      setBusy(false)
+      setBusy("")
     }
   }
 
-  async function check() {
-    setChecking(true)
+  async function runCheck(body, target) {
+    setCheckTarget(target)
     setError("")
     setNotice("")
+    const started = performance.now()
+    const elapsed = () => Math.max(0, Math.round(performance.now() - started))
+    const counts = target === "saved" || (!String(body.api_key || "").trim() && body.provider === saved.provider && body.model === saved.model && body.api_base === saved.apiBase)
     try {
-      const result = await checkModel(payload())
+      const result = await checkModel(body)
+      const ms = elapsed()
       if (result.ok) {
+        if (counts) setProbe({ ok: true, ms })
         const reply = result.reply ? `应答：${result.reply}` : "模型有应答。"
-        setNotice(`检测通过。${reply}`)
+        setNotice(`连接通过。${reply}`)
       } else {
-        setError(result.error || "检测没有通过。")
+        if (counts) setProbe({ ok: false, ms })
+        setError(result.error || "连接没有通过。")
       }
     } catch (reason) {
+      if (counts) setProbe({ ok: false, ms: elapsed() })
       setError(reason.message)
     } finally {
-      setChecking(false)
+      setCheckTarget("")
     }
   }
 
+  function recheck() {
+    return runCheck({
+      provider: saved.provider,
+      model: saved.model,
+      api_key: "",
+      api_base: saved.apiBase,
+      style: saved.style,
+      clear_key: false,
+    }, "saved")
+  }
+
+  async function clearConfig() {
+    if (!confirmClear) {
+      setConfirmClear(true)
+      return
+    }
+    setConfirmClear(false)
+    if (!saved.keySet && !saved.apiBase) {
+      setProvider(saved.provider || DEFAULT_PROVIDER)
+      setModel(saved.model || modelForProvider(saved.provider || DEFAULT_PROVIDER, DEFAULT_MODEL))
+      setApiBase("")
+      setApiKey("")
+      setStyle(saved.style || "")
+      setError("")
+      setNotice("已恢复为当前保存的配置。")
+      return
+    }
+    setBusy("clear")
+    setError("")
+    setNotice("")
+    try {
+      const next = await saveModel({
+        provider: saved.provider || provider.trim() || DEFAULT_PROVIDER,
+        model: saved.model || model.trim() || DEFAULT_MODEL,
+        api_key: "",
+        api_base: "",
+        style: saved.style,
+        clear_key: true,
+      })
+      remember(next, saved.owner)
+      setApiKey("")
+      setProbe(null)
+      setNotice(next.username ? `已清除 ${next.username} 账号上的密钥和接口地址。提供方和模型名还在。` : "已清除密钥和接口地址。提供方和模型名还在。")
+    } catch (reason) {
+      setError(reason.message)
+    } finally {
+      setBusy("")
+    }
+  }
+
+  const frame = (children) => (
+    <StudioFrame here="接入模型" title="接入模型" seal="模" lede={MODEL_LEDE} active="model" onLeave={onLeave} showStatus={false}>
+      {children}
+    </StudioFrame>
+  )
+
   if (!loaded) {
-    return (
-      <StudioFrame here="接入模型" title="接入模型" seal="模" lede="规划、写作和修改共用这一份。密钥只留在当前账号，页面不显示完整密钥。" active="model" onLeave={onLeave}>
-        <section className="manuscript">
-          <p className="manuscript-wait" role="status">正在读取模型配置。</p>
-        </section>
-      </StudioFrame>
+    return frame(
+      <section className="model-card">
+        <p className="manuscript-wait" role="status">正在读取模型配置。</p>
+      </section>,
     )
   }
 
-  return (
-    <StudioFrame here="接入模型" title="接入模型" seal="模" lede="规划、写作和修改共用这一份。密钥只留在当前账号，页面不显示完整密钥。" active="model" onLeave={onLeave}>
-      <form className="manuscript" autoComplete="off" onSubmit={submit}>
-        {ready && owner ? <p className="model-bound">已绑定 {owner}{named ? ` · ${named}` : ""}</p> : null}
-        <Field label="提供方" hint={note}>
-          <select value={provider} onChange={chooseProvider} required>
+  let availability = "未绑定"
+  let available = false
+  if (checkTarget === "saved") availability = "检测中"
+  else if (probe?.ok) {
+    availability = `可用（${probe.ms}ms）`
+    available = true
+  } else if (probe && !probe.ok) availability = "不可用"
+  else if (saved.keySet) availability = "尚未检测"
+  const foot = saved.keySet
+    ? `已使用你自己的 API Key（绑定到${saved.owner || "你"}的账号）。`
+    : "还没有绑定密钥。留空保存时，调用层按该提供方的环境变量取。"
+
+  return frame(
+    <div className="model-desk">
+      <section className="model-card model-status" aria-label="大模型 API 状态">
+        <h2 className="model-card-title"><StatusGlyph /> 大模型 API 状态</h2>
+        <dl className="model-facts">
+          <div>
+            <dt>我的 Key</dt>
+            <dd>{saved.keySet ? <span className="model-ok"><OkIcon /> 已绑定</span> : "未绑定"}</dd>
+          </div>
+          <div>
+            <dt>可用性</dt>
+            <dd className="model-avail">
+              {available ? <span className="model-ok"><OkIcon /> {availability}</span> : <span>{availability}</span>}
+              <button className="model-recheck" type="button" disabled={!saved.ready || pending} onClick={recheck}>
+                {checkTarget === "saved" ? "检测中" : "重新检测"}
+              </button>
+            </dd>
+          </div>
+          <div>
+            <dt>模型</dt>
+            <dd>{saved.model || "—"}</dd>
+          </div>
+          <div>
+            <dt>API 地址</dt>
+            <dd>{saved.ready ? <SoftUrl text={saved.apiBase || "默认地址"} /> : "—"}</dd>
+          </div>
+          <div>
+            <dt>API Key</dt>
+            <dd className="model-secret">{saved.keySet ? (saved.keyHint || "已保存") : "未填写"}</dd>
+          </div>
+        </dl>
+        <p className="model-foot">{foot}</p>
+      </section>
+      <form className="model-card model-config" autoComplete="off" onSubmit={submit}>
+        <h2 className="model-card-title"><PenIcon /> 大模型 API 配置</h2>
+        <p className="model-lead">在这里填写你自己的大模型 API，配置会<strong>绑定到你的账号并保存下来</strong>，其他账号不受影响。规划、写作和修改都用这一份。</p>
+        <Field label="API Key" hint="兼容 OpenAI 的 API Key（如 DeepSeek 等），保存到你的账号。">
+          <input type="password" value={apiKey} onChange={edit(setApiKey)} placeholder={saved.keySet ? "留空保持不变，不覆盖已保存的 Key" : "sk-…"} spellCheck="false" autoComplete="off" />
+        </Field>
+        <Field label="快速预设（可选）" hint="选择后会自动填充下方「API 地址」和「模型名称」，仍可手动修改。">
+          <select value={preset} onChange={choosePreset}>
+            <option value="">选择预设，自动填充地址与模型…</option>
             {providers.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
         </Field>
-        <Field label="模型" hint={named ? `调用名 ${named}` : ""}>
-          <select value={model} onChange={(event) => setModel(event.target.value)} required>
-            {models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
+        <Field label="API 地址（Base URL）" hint={addressHint}>
+          <input value={apiBase} onChange={edit(setApiBase)} placeholder={providerBase(provider) || "https://"} spellCheck="false" />
         </Field>
-        <Field label="密钥" hint={keyNote}>
-          <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={keySet ? "留空则保持现有密钥" : "sk-…"} spellCheck="false" autoComplete="off" />
+        <Field label="模型名称" hint={named ? `调用名 ${named}。预设填入后仍可手改。` : "预设填入后仍可手改。"}>
+          <input value={model} onChange={edit(setModel)} list={modelListId} required spellCheck="false" />
         </Field>
-        {keySet && !apiKey.trim() ? (
-          <label className="draft-check model-clear">
-            <input type="checkbox" checked={clearKey} onChange={(event) => setClearKey(event.target.checked)} />
-            清除已保存的密钥
-          </label>
-        ) : null}
-        <Field label="接口地址">
-          <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="留空则用该提供方的默认地址" spellCheck="false" />
-        </Field>
+        <datalist id={modelListId}>
+          {models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </datalist>
         <Field label="文风">
-          <select value={style} onChange={(event) => setStyle(event.target.value)}>
+          <select value={style} onChange={edit(setStyle)}>
             {styleOptions.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}
           </select>
         </Field>
         {error ? <p className="banner" role="status">{error}</p> : null}
         {notice ? <p className="banner ok" role="status">{notice}</p> : null}
-        <div className="manuscript-foot">
-          <button className="manuscript-side" type="button" disabled={busy || checking || !provider.trim() || !model.trim()} onClick={check}>
-            {checking ? "检测中" : "检测"}
+        <div className="model-actions">
+          <button className="manuscript-create" type="submit" disabled={!canWrite}>
+            {busy === "save" ? "保存中" : "保存并生效"}
           </button>
-          <button className="manuscript-create" type="submit" disabled={busy || checking || !provider.trim() || !model.trim()}>
-            {busy ? "保存中" : "保存"}
+          <button className="model-ghost" type="button" disabled={!canWrite} onClick={() => runCheck(payload(), "form")}>
+            {checkTarget === "form" ? "测试中" : "测试连接"}
+          </button>
+          <button className="model-ghost" type="button" disabled={pending} onClick={clearConfig}>
+            {busy === "clear" ? "清除中" : confirmClear ? "确认清除" : "清除配置"}
           </button>
         </div>
       </form>
-    </StudioFrame>
+    </div>,
   )
 }
 
@@ -742,9 +860,59 @@ function applySettings(settings, fields) {
   fields.setModel(settings.model || "")
   fields.setApiBase(settings.api_base || "")
   fields.setStyle(settings.style || "")
-  fields.setKeySet(Boolean(settings.api_key_set))
-  fields.setKeyHint(settings.key_hint || "")
   fields.setError(settings.error || "")
+}
+
+const blankBinding = {
+  provider: "",
+  model: "",
+  apiBase: "",
+  style: "",
+  keySet: false,
+  keyHint: "",
+  ready: false,
+  owner: "",
+}
+
+function bindingFrom(settings, ownerFallback = "") {
+  return {
+    provider: settings.provider || "",
+    model: settings.model || "",
+    apiBase: settings.api_base || "",
+    style: settings.style || "",
+    keySet: Boolean(settings.api_key_set),
+    keyHint: settings.key_hint || "",
+    ready: Boolean(settings.ready),
+    owner: settings.username || ownerFallback,
+  }
+}
+
+function SoftUrl({ text }) {
+  if (!/^https?:/.test(text)) return text
+  const bits = text.split(/(?<=[./:])/)
+  return bits.map((bit, index) => (
+    <span key={`${bit}-${index}`}>
+      {bit}
+      {index < bits.length - 1 ? <wbr /> : null}
+    </span>
+  ))
+}
+
+function OkIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.2 8.2l3 3.1 6.6-6.8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function StatusGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 12.2l2.6 2.6L16.2 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
 function shelfTitle(book) {
@@ -753,7 +921,7 @@ function shelfTitle(book) {
   return folderName(book.directory)
 }
 
-function StudioFrame({ here, title, seal, lede, active, onLeave, children }) {
+function StudioFrame({ here, title, seal, lede, active, onLeave, showStatus = true, children }) {
   const { library, setLibrary } = useLibrary()
   const [basketError, setBasketError] = useState("")
 
@@ -786,7 +954,7 @@ function StudioFrame({ here, title, seal, lede, active, onLeave, children }) {
           <h1>{title}<span className="hall-seal" aria-hidden="true">{seal}</span></h1>
           <p>{lede}</p>
         </header>
-        <ModelStatus library={library} />
+        {showStatus ? <ModelStatus library={library} /> : null}
         {basketError ? <p className="banner" role="status">{basketError}</p> : null}
         <div className="hall-body">
           <HallMenu
@@ -1427,13 +1595,13 @@ function GuideStep({ guide, busy, error, onAct }) {
           <Field label="章节标题">
             <input value={chapterTitle} disabled={busy} onChange={(event) => setChapterTitle(event.target.value)} />
           </Field>
-          <Field
-            label="章节内容"
-            extra={<button type="button" className="field-ai" disabled={busy || !note.trim()} onClick={revise}>{busy ? "生成中" : "AI 修改"}</button>}
-          >
+          <Field label="章节内容">
             <textarea className="chapter-body" value={chapterBody} rows={16} placeholder="开始写作吧..." disabled={busy || stage === "done"} onChange={(event) => setChapterBody(event.target.value)} />
           </Field>
-          <Field label="交给 AI 的修改要求">
+          <Field
+            label="交给 AI 的修改要求"
+            extra={<button type="button" className="field-ai" disabled={busy || !note.trim()} onClick={revise}>{busy ? "生成中" : "AI 修改"}</button>}
+          >
             <textarea value={note} rows={3} placeholder="把雨夜改成清晨" disabled={busy} onChange={(event) => setNote(event.target.value)} />
           </Field>
         </>
