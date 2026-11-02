@@ -25,6 +25,7 @@ class AppConfig(BaseModel):
     api_key: str = ""
     api_base: str = ""
     style: str = ""
+    style_text: str = ""
     roles: dict[str, RoleConfig] = Field(default_factory=dict)
 
 
@@ -55,6 +56,7 @@ def describe_model(config: AppConfig | None) -> dict:
             "model": "",
             "api_base": "",
             "style": "",
+            "style_text": "",
             "api_key_set": False,
             "key_hint": "",
         }
@@ -65,6 +67,7 @@ def describe_model(config: AppConfig | None) -> dict:
         "model": config.model,
         "api_base": config.api_base,
         "style": config.style,
+        "style_text": config.style_text,
         "api_key_set": bool(key),
         "key_hint": f"····{key[-4:]}" if len(key) >= 8 else "",
     }
@@ -78,6 +81,7 @@ def store_config(
     api_key: str,
     api_base: str,
     style: str,
+    style_text: str | None = None,
 ) -> None:
     """写回配置。原文件里的其他字段（例如 roles）保留。"""
     raw: dict = {}
@@ -93,6 +97,8 @@ def store_config(
     raw["api_key"] = api_key
     raw["api_base"] = api_base
     raw["style"] = style
+    if style_text is not None:
+        raw["style_text"] = style_text
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     text = json.dumps(raw, ensure_ascii=False, indent=2) + "\n"

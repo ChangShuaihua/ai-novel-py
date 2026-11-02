@@ -84,6 +84,9 @@ class Host:
             book = Book.open(root, writable=True)
             style = config.style if config is not None else ""
             bundle = load_bundle(style, root, include_home=include_home)
+            note = config.style_text.strip() if config is not None else ""
+            if style == "custom" and note:
+                bundle.styles["custom"] = note
             workers = build_workers(root, style=style, bundle=bundle, include_home=include_home)
             return cls(book, completer, bundle.prompts, workers, lock)
         except Exception:

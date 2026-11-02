@@ -180,9 +180,57 @@ class Desk:
                 fields["api_key"] = ""
             else:
                 fields["api_key"] = self._existing_key()
-        store_config(self._config_file(), **fields)
+        store_config(self._config_file(), **fields, style_text=_style_text(payload))
         self._drop_current_host()
         return self.model_settings()
+
+    def compose_synopsis(self, title: str, note: str = "", current: str = "", transport=None) -> dict:
+        """用已保存的模型写一段简介。不改配置。"""
+        if not self.config_ready():
+            raise DeskError("还没接入模型。")
+        config = load_config(self._config_file())
+        heading = " ".join(str(title or "").split())
+        if not heading:
+            raise DeskError("先写下标题，再生成简介。")
+        if len(heading) > 80:
+            raise DeskError("标题太长。")
+        extra = str(note or "").strip()
+        if len(extra) > 1000:
+            extra = extra[:1000]
+        existing = str(current or "").strip()
+        if len(existing) > 1000:
+            existing = existing[:1000]
+        prompt = (
+            "你在写网文的作品简介。根据标题写 120 到 220 字的中文简介。"
+            "只输出简介正文，不要标题，不要引号，不要分点。\n"
+            f"标题：{heading}"
+        )
+        if extra:
+            prompt += f"\n可以参考这些内容：\n{extra}"
+        if existing:
+            prompt += f"\n现有简介，可以重写得更清楚：\n{existing}"
+        client = transport or LiteLLMTransport(idle_timeout=40)
+        try:
+            result = client.complete(
+                ModelRef(
+                    provider=config.provider,
+                    model=config.model,
+                    api_key=config.api_key,
+                    api_base=config.api_base,
+                ),
+                [{"role": "user", "content": prompt}],
+                [],
+                max_tokens=500,
+            )
+        except ProviderError as exc:
+            raise DeskError(_probe_error(exc, config.api_key)) from exc
+        lines = [" ".join(line.split()) for line in (result.content or "").splitlines()]
+        text = "\n".join(line for line in lines if line).strip()
+        if not text:
+            raise DeskError("模型没有写出简介。")
+        if len(text) > 1000:
+            text = text[:1000]
+        return {"synopsis": text}
 
     def probe_model(self, payload: dict, transport=None) -> dict:
         """问模型一句短话。不写配置，密钥留在账号文件里。"""
@@ -939,6 +987,17 @@ def _model_fields(payload: dict) -> dict:
     if style and _STYLE_NAME.fullmatch(style) is None:
         raise DeskError("文风只能使用字母、数字、短横线，或留空")
     return {"provider": provider, "model": model, "api_key": api_key, "api_base": api_base, "style": style}
+
+
+def _style_text(payload: dict) -> str | None:
+    if "style_text" not in payload:
+        return None
+    text = str(payload.get("style_text") or "").strip()
+    if len(text) > 2000:
+        raise DeskError("自定义文风最长 2000 字。")
+    if any(ord(ch) < 32 and ch not in "\n\r\t" for ch in text):
+        raise DeskError("自定义文风里有不能用的字符。")
+    return text
 
 
 def _export_name(name: str) -> str:

@@ -1,6 +1,6 @@
 import { cloneElement, useEffect, useId, useRef, useState } from "react"
 
-import { bookHref, checkModel, currentUsername, emptyTrash, getLibrary, getModel, moveBook, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
+import { bookHref, checkModel, composeSynopsis, currentUsername, emptyTrash, getLibrary, getModel, moveBook, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
 import { blocks, deskState } from "./deskState.js"
 import {
   DEFAULT_MODEL,
@@ -550,10 +550,16 @@ function Wastebasket({ trash, onRestore, onEmpty }) {
 
 const STYLE_OPTIONS = [
   ["", "不附加"],
-  ["default", "default"],
-  ["fantasy", "fantasy"],
-  ["romance", "romance"],
-  ["suspense", "suspense"],
+  ["default", "默认"],
+  ["fantasy", "奇幻"],
+  ["xianxia", "仙侠"],
+  ["wuxia", "武侠"],
+  ["romance", "言情"],
+  ["suspense", "悬疑"],
+  ["urban", "都市"],
+  ["scifi", "科幻"],
+  ["history", "历史"],
+  ["custom", "自定义"],
 ]
 
 const MODEL_LEDE = "配置你自己的大模型 API，绑定到你的账号，不影响其他账号。"
@@ -624,9 +630,6 @@ export function ModelScreen({ onLeave }) {
   const providers = providerOptions(provider)
   const models = modelOptions(provider, model)
   const named = callName(provider, model)
-  const styleOptions = STYLE_OPTIONS.some(([value]) => value === style) || !style
-    ? STYLE_OPTIONS
-    : [[style, style], ...STYLE_OPTIONS]
   const addressHint = [providerNote(provider), "需以 http:// 或 https:// 开头。留空则用该提供方的默认地址。"].filter(Boolean).join(" ")
   const pending = Boolean(busy || checkTarget)
   const canWrite = !pending && Boolean(provider.trim() && model.trim())
@@ -818,11 +821,6 @@ export function ModelScreen({ onLeave }) {
         <datalist id={modelListId}>
           {models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
         </datalist>
-        <Field label="文风">
-          <select value={style} onChange={edit(setStyle)}>
-            {styleOptions.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}
-          </select>
-        </Field>
         {error ? <p className="banner" role="status">{error}</p> : null}
         {notice ? <p className="banner ok" role="status">{notice}</p> : null}
         <div className="model-actions">
@@ -1007,37 +1005,96 @@ function readDraft() {
 export function NewBook({ directory, onLeave }) {
   const linked = String(directory || "").startsWith("db:") ? directory : ""
   const saved = readDraft()
+  const draftStyle = saved != null && Object.prototype.hasOwnProperty.call(saved, "style")
+  const draftNote = saved != null && Object.prototype.hasOwnProperty.call(saved, "styleText")
   const [title, setTitle] = useState(saved?.title || "")
   const [synopsis, setSynopsis] = useState(saved?.synopsis || "")
   const [chapter, setChapter] = useState(saved?.chapter || "")
+  const [style, setStyle] = useState(draftStyle ? saved.style : "")
+  const [styleText, setStyleText] = useState(draftNote ? saved.styleText : "")
   const [keepDraft, setKeepDraft] = useState(Boolean(saved?.keep))
   const [bookId, setBookId] = useState(linked)
   const [error, setError] = useState("")
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState("")
 
   useEffect(() => {
     setBookId(linked)
   }, [linked])
 
   useEffect(() => {
+    if (draftStyle && draftNote) return undefined
+    let stop = false
+    getModel()
+      .then((settings) => {
+        if (stop) return
+        if (!draftStyle) setStyle(settings.style || "")
+        if (!draftNote) setStyleText(settings.style_text || "")
+      })
+      .catch(() => {})
+    return () => {
+      stop = true
+    }
+  }, [draftStyle, draftNote])
+
+  useEffect(() => {
     if (!keepDraft) {
       localStorage.removeItem(DRAFT_KEY)
       return
     }
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ title, synopsis, chapter, keep: true }))
-  }, [keepDraft, title, synopsis, chapter])
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ title, synopsis, chapter, style, styleText, keep: true }))
+  }, [keepDraft, title, synopsis, chapter, style, styleText])
 
   const seed = [chapter.trim(), synopsis.trim(), title.trim()].filter(Boolean).join("\n")
+  const styleOptions = STYLE_OPTIONS.some(([value]) => value === style) || !style
+    ? STYLE_OPTIONS
+    : [[style, style], ...STYLE_OPTIONS]
+
+  async function draftSynopsis() {
+    if (!title.trim()) {
+      setError("先写下标题，再生成简介。")
+      return
+    }
+    setBusy("synopsis")
+    setError("")
+    try {
+      const result = await composeSynopsis({
+        title: title.trim(),
+        note: chapter.trim(),
+        current: synopsis.trim(),
+      })
+      setSynopsis(String(result.synopsis || "").slice(0, 1000))
+    } catch (reason) {
+      setError(reason.message)
+    } finally {
+      setBusy("")
+    }
+  }
 
   async function submit(event) {
     event?.preventDefault()
+    if (busy) return
     if (!seed) {
       setError("先写下标题、简介，或这一章想写的内容。")
       return
     }
-    setBusy(true)
+    setBusy("start")
     setError("")
     try {
+      const settings = await getModel().catch(() => null)
+      const note = style === "custom" ? styleText.trim() : ""
+      const styleChanged = (settings?.style || "") !== style
+      const noteChanged = style === "custom" && (settings?.style_text || "") !== note
+      if (settings?.provider && settings?.model && (styleChanged || noteChanged)) {
+        await saveModel({
+          provider: settings.provider,
+          model: settings.model,
+          api_key: "",
+          api_base: settings.api_base || "",
+          style,
+          style_text: style === "custom" ? note : settings.style_text || "",
+          clear_key: false,
+        })
+      }
       const snap = await sendIntent({
         action: "start",
         requirement: seed,
@@ -1055,7 +1112,7 @@ export function NewBook({ directory, onLeave }) {
     } catch (reason) {
       setError(reason.message)
     } finally {
-      setBusy(false)
+      setBusy("")
     }
   }
 
@@ -1065,12 +1122,37 @@ export function NewBook({ directory, onLeave }) {
         <Field label="小说标题" count={`${title.length}/24`}>
           <input value={title} maxLength={24} placeholder="请输入作品标题，24字以内" disabled={busy} onChange={(event) => setTitle(event.target.value)} />
         </Field>
-        <Field label="小说简介" count={`${synopsis.length}/1000`}>
-          <textarea value={synopsis} maxLength={1000} rows={4} placeholder="请输入作品简介，支持 Markdown" disabled={busy} onChange={(event) => setSynopsis(event.target.value)} />
+        <Field
+          label="小说简介"
+          count={`${synopsis.length}/1000`}
+          extra={(
+            <button type="button" className="field-ai" disabled={Boolean(busy) || !title.trim()} onClick={draftSynopsis}>
+              {busy === "synopsis" ? "生成中" : "AI 生成"}
+            </button>
+          )}
+        >
+          <textarea value={synopsis} maxLength={1000} rows={4} placeholder="请输入作品简介，支持 Markdown" disabled={Boolean(busy)} onChange={(event) => setSynopsis(event.target.value)} />
         </Field>
+        <Field label="文风">
+          <select value={style} disabled={Boolean(busy)} onChange={(event) => setStyle(event.target.value)}>
+            {styleOptions.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}
+          </select>
+        </Field>
+        {style === "custom" ? (
+          <Field label="自定义文风" count={`${styleText.length}/2000`}>
+            <textarea
+              value={styleText}
+              maxLength={2000}
+              rows={4}
+              placeholder="例如：短句，冷一点，少用形容词，对话要像真人。"
+              disabled={Boolean(busy)}
+              onChange={(event) => setStyleText(event.target.value)}
+            />
+          </Field>
+        ) : null}
         <Field
           label="章节内容"
-          extra={<button type="button" className="field-ai" disabled={busy || !seed} onClick={submit}>AI 生成</button>}
+          extra={<button type="button" className="field-ai" disabled={Boolean(busy) || !seed} onClick={submit}>AI 生成</button>}
         >
           <textarea value={chapter} rows={8} placeholder="开始写作吧..." disabled={busy} onChange={(event) => setChapter(event.target.value)} />
         </Field>
@@ -1086,8 +1168,8 @@ export function NewBook({ directory, onLeave }) {
             <input type="checkbox" checked={keepDraft} disabled={busy} onChange={(event) => setKeepDraft(event.target.checked)} />
             保存草稿
           </label>
-          <button className="manuscript-create" type="submit" disabled={busy || !seed}>
-            <QuillIcon /> {busy ? "生成中" : "开始创作"}
+          <button className="manuscript-create" type="submit" disabled={Boolean(busy) || !seed}>
+            <QuillIcon /> {busy === "start" ? "生成中" : "开始创作"}
           </button>
         </div>
       </form>

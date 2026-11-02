@@ -309,6 +309,73 @@ def test_model_screen_saves_without_returning_the_key(tmp_path: Path):
     assert reopened.model_settings()["api_key_set"] is True
 
 
+def test_custom_style_is_kept_when_the_model_form_omits_it(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({"provider": "openai", "model": "gpt-4.1", "api_key": "sk-test-secret-value", "style": "fantasy"}),
+        encoding="utf-8",
+    )
+    desk = Desk(library_path=tmp_path / "library.json", config_path=config, books_root=tmp_path / "new")
+    saved = desk.save_model({
+        "provider": "openai",
+        "model": "gpt-4.1",
+        "api_key": "",
+        "style": "custom",
+        "style_text": "全用短句。",
+    })
+    assert saved["style"] == "custom"
+    assert saved["style_text"] == "全用短句。"
+    again = desk.save_model({"provider": "openai", "model": "gpt-4.1", "api_key": "", "style": "custom"})
+    assert again["style_text"] == "全用短句。"
+    with pytest.raises(DeskError, match="2000"):
+        desk.save_model({"provider": "openai", "model": "gpt-4.1", "style": "custom", "style_text": "字" * 2001})
+
+
+def test_synopsis_uses_the_saved_model(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({"provider": "openai", "model": "gpt-4.1", "api_key": "sk-test-secret-value"}),
+        encoding="utf-8",
+    )
+    desk = Desk(library_path=tmp_path / "library.json", config_path=config, books_root=tmp_path / "new")
+    seen = {}
+
+    class Transport:
+        def complete(self, model, messages, tools, max_tokens=None):
+            seen["key"] = model.api_key
+            seen["prompt"] = messages[0]["content"]
+            return Completion(content="雨夜醒来的人，发现城里的灯都灭了。")
+
+    result = desk.compose_synopsis("雨夜", "他不记得自己的名字", transport=Transport())
+    assert result["synopsis"].startswith("雨夜醒来")
+    assert seen["key"] == "sk-test-secret-value"
+    assert "他不记得自己的名字" in seen["prompt"]
+    assert json.loads(config.read_text(encoding="utf-8"))["api_key"] == "sk-test-secret-value"
+    with pytest.raises(DeskError, match="标题"):
+        desk.compose_synopsis("  ")
+
+
+def test_custom_style_is_given_to_the_writer(tmp_path: Path):
+    from ainovel.host.host import Host
+
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({
+            "provider": "openai",
+            "model": "gpt-4.1",
+            "api_key": "sk-test-secret-value",
+            "style": "custom",
+            "style_text": "全用短句。",
+        }),
+        encoding="utf-8",
+    )
+    host = Host.open(tmp_path / "book", config_path=config, completer=object(), include_home=False)
+    try:
+        assert "全用短句。" in host.workers["writer"].system_prompt
+    finally:
+        host.close()
+
+
 def test_probe_uses_the_saved_key_and_does_not_rewrite_it(tmp_path: Path):
     config = tmp_path / "config.json"
     config.write_text(

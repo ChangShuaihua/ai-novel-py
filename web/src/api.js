@@ -187,6 +187,14 @@ export function saveModel(payload) {
   })
 }
 
+export function composeSynopsis(payload) {
+  return request("/api/synopsis", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+}
+
 export function checkModel(payload) {
   return request("/api/model/check", {
     method: "POST",

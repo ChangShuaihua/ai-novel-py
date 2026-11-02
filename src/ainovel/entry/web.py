@@ -177,6 +177,13 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
                 if parsed.path == "/api/model/check":
                     self._send(200, self._owned(desk.probe_model(payload)))
                     return
+                if parsed.path == "/api/synopsis":
+                    self._send(200, desk.compose_synopsis(
+                        str(payload.get("title") or ""),
+                        str(payload.get("note") or ""),
+                        str(payload.get("current") or ""),
+                    ))
+                    return
                 if parsed.path == "/api/model":
                     self._send(200, self._owned(desk.save_model(payload)))
                     return
