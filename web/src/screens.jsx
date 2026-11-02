@@ -85,15 +85,6 @@ function useLibrary() {
   return { library, setLibrary, loadError }
 }
 
-function ModelStatus({ library }) {
-  if (!library || library.config_ready) return null
-  return (
-    <p className="banner" role="status">
-      还没接入模型。需要模型的动作先停在这里。 <a href="#/model">接入模型</a>
-    </p>
-  )
-}
-
 function HallTop({ here, onLeave, children }) {
   const [accountOpen, setAccountOpen] = useState(false)
   useEffect(() => {
@@ -285,7 +276,6 @@ export function Shelf({ onLeave }) {
           <h1>书架<span className="hall-seal" aria-hidden="true">架</span></h1>
           <p>每本书只回答现在写到哪。点进去，再决定下一步谁动。</p>
         </header>
-        <ModelStatus library={library} />
         {actionError || loadError ? <p className="banner" role="status">{actionError || loadError}</p> : null}
         <div className="hall-body">
           <HallMenu
@@ -749,7 +739,7 @@ export function ModelScreen({ onLeave }) {
   }
 
   const frame = (children) => (
-    <StudioFrame here="接入模型" title="接入模型" seal="模" lede={MODEL_LEDE} active="model" onLeave={onLeave} showStatus={false}>
+    <StudioFrame here="接入模型" title="接入模型" seal="模" lede={MODEL_LEDE} active="model" onLeave={onLeave}>
       {children}
     </StudioFrame>
   )
@@ -917,7 +907,7 @@ function shelfTitle(book) {
   return folderName(book.directory)
 }
 
-function StudioFrame({ here, title, seal, lede, active, onLeave, showStatus = true, children }) {
+function StudioFrame({ here, title, seal, lede, active, onLeave, children }) {
   const { library, setLibrary } = useLibrary()
   const [basketError, setBasketError] = useState("")
 
@@ -950,7 +940,6 @@ function StudioFrame({ here, title, seal, lede, active, onLeave, showStatus = tr
           <h1>{title}<span className="hall-seal" aria-hidden="true">{seal}</span></h1>
           <p>{lede}</p>
         </header>
-        {showStatus ? <ModelStatus library={library} /> : null}
         {basketError ? <p className="banner" role="status">{basketError}</p> : null}
         <div className="hall-body">
           <HallMenu
