@@ -786,15 +786,6 @@ h2 {
   border-color: #c9e0d4;
 }
 
-.model-line {
-  margin: 16px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.model-line a { color: var(--cinnabar-deep); text-decoration: none; }
-.model-line a:hover { text-decoration: underline; }
-
 .notice {
   background: transparent;
   border: 0;
@@ -2102,8 +2093,7 @@ button.signal:disabled {
   letter-spacing: 0.06em;
 }
 
-.hall .banner,
-.hall .model-line {
+.hall .banner {
   width: min(640px, 100%);
   margin-right: auto;
   margin-left: auto;

@@ -85,17 +85,13 @@ function useLibrary() {
   return { library, setLibrary, loadError }
 }
 
-function ModelStatus({ library, line = true }) {
-  if (!library) return null
-  if (!library.config_ready) {
-    return (
-      <p className="banner" role="status">
-        还没接入模型。需要模型的动作先停在这里。 <a href="#/model">接入模型</a>
-      </p>
-    )
-  }
-  if (!line || !library.model_label) return null
-  return <p className="model-line">当前模型 {library.model_label} · <a href="#/model">更换</a></p>
+function ModelStatus({ library }) {
+  if (!library || library.config_ready) return null
+  return (
+    <p className="banner" role="status">
+      还没接入模型。需要模型的动作先停在这里。 <a href="#/model">接入模型</a>
+    </p>
+  )
 }
 
 function HallTop({ here, onLeave, children }) {
@@ -289,7 +285,7 @@ export function Shelf({ onLeave }) {
           <h1>书架<span className="hall-seal" aria-hidden="true">架</span></h1>
           <p>每本书只回答现在写到哪。点进去，再决定下一步谁动。</p>
         </header>
-        <ModelStatus library={library} line={false} />
+        <ModelStatus library={library} />
         {actionError || loadError ? <p className="banner" role="status">{actionError || loadError}</p> : null}
         <div className="hall-body">
           <HallMenu
