@@ -85,7 +85,7 @@ function useLibrary() {
   return { library, setLibrary, loadError }
 }
 
-function ModelStatus({ library }) {
+function ModelStatus({ library, line = true }) {
   if (!library) return null
   if (!library.config_ready) {
     return (
@@ -94,7 +94,7 @@ function ModelStatus({ library }) {
       </p>
     )
   }
-  if (!library.model_label) return null
+  if (!line || !library.model_label) return null
   return <p className="model-line">当前模型 {library.model_label} · <a href="#/model">更换</a></p>
 }
 
@@ -289,7 +289,7 @@ export function Shelf({ onLeave }) {
           <h1>书架<span className="hall-seal" aria-hidden="true">架</span></h1>
           <p>每本书只回答现在写到哪。点进去，再决定下一步谁动。</p>
         </header>
-        <ModelStatus library={library} />
+        <ModelStatus library={library} line={false} />
         {actionError || loadError ? <p className="banner" role="status">{actionError || loadError}</p> : null}
         <div className="hall-body">
           <HallMenu
