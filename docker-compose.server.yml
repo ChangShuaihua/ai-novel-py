@@ -1,0 +1,39 @@
+# 只在这台 ECS 上和 WereWolf 一起用。80 已经被狼人杀占用，安全组又只放行 443，
+# 所以页面开在 http://47.97.166.61:443 。数据库和 Redis 不映射到宿主机。
+services:
+  mysql:
+    restart: unless-stopped
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+      - --max-connections=30
+    mem_limit: 450m
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-painovel"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  redis:
+    restart: unless-stopped
+    mem_limit: 64m
+
+  api:
+    restart: unless-stopped
+    mem_limit: 600m
+    build:
+      context: .
+      args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
+    environment:
+      AINOVEL_CORS_ORIGINS: http://47.97.166.61:443
+
+  web:
+    restart: unless-stopped
+    mem_limit: 64m
+    ports: !override
+      - "443:80"
+    build:
+      args:
+        VITE_API_BASE: http://47.97.166.61:443

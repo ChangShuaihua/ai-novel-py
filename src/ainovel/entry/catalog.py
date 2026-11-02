@@ -486,6 +486,7 @@ def _ensure_schema() -> None:
         connection = _connect()
         try:
             with connection.cursor() as cur:
+                _install_base_schema(cur)
                 cur.execute(_FILES)
                 _add_trashed_at(cur)
             connection.commit()
@@ -662,8 +663,73 @@ def _add_trashed_at(cur) -> None:
     cur.execute("ALTER TABLE books ADD COLUMN trashed_at DATETIME(6) NULL")
 
 
+def _install_base_schema(cur) -> None:
+    """空库只有库名、没有表时，按 docs/mysql-schema.sql 把表补上。"""
+    if not _table_missing(cur, "users"):
+        return
+    path = _schema_path()
+    if not path.is_file():
+        raise CatalogError("还没有数据库表")
+    for statement in _schema_statements(path.read_text(encoding="utf-8")):
+        try:
+            cur.execute(statement)
+        except Exception as exc:
+            if not _already_exists(exc):
+                raise
+
+
+def _table_missing(cur, name: str) -> bool:
+    cur.execute(
+        """
+        SELECT COUNT(*) AS n FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+        """,
+        (name,),
+    )
+    row = cur.fetchone()
+    return int(row["n"]) == 0
+
+
+def _schema_path() -> Path:
+    beside_repo = Path(__file__).resolve().parents[3] / "docs" / "mysql-schema.sql"
+    if beside_repo.is_file():
+        return beside_repo
+    return Path("/app/docs/mysql-schema.sql")
+
+
+def _schema_statements(text: str) -> list[str]:
+    lines = []
+    for line in text.splitlines():
+        if line.strip().startswith("--"):
+            continue
+        lines.append(line)
+    statements = []
+    for part in "\n".join(lines).split(";"):
+        statement = part.strip()
+        if not statement:
+            continue
+        head = statement.split(None, 2)
+        if head and head[0].upper() == "USE":
+            continue
+        if len(head) >= 2 and head[0].upper() == "CREATE" and head[1].upper() == "DATABASE":
+            continue
+        statements.append(statement)
+    return statements
+
+
+def _already_exists(exc: BaseException) -> bool:
+    args = getattr(exc, "args", ())
+    return bool(args) and args[0] == 1050
+
+
 def _db_message(exc: BaseException) -> str:
-    detail = " ".join(str(item) for item in getattr(exc, "args", ())[:1])
+    args = getattr(exc, "args", ())
+    if len(args) >= 2 and args[1]:
+        detail = str(args[1])
+    elif args:
+        detail = str(args[0])
+    else:
+        detail = ""
     if not detail:
         detail = "数据库没连上"
     if len(detail) > 180:

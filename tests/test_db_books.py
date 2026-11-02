@@ -92,6 +92,24 @@ def test_snapshot_does_not_upload_the_book(tmp_path: Path):
     desk.shutdown()
 
 
+def test_schema_statements_leave_out_the_database_preamble():
+    from ainovel.entry.catalog import _schema_path, _schema_statements
+
+    statements = _schema_statements(_schema_path().read_text(encoding="utf-8"))
+    assert any(item.startswith("CREATE TABLE users") for item in statements)
+    assert any(item.startswith("CREATE TABLE books") for item in statements)
+    assert all(not item.upper().startswith("CREATE DATABASE") for item in statements)
+    assert all(not item.upper().startswith("USE ") for item in statements)
+
+
+def test_db_message_uses_the_database_text():
+    from ainovel.entry.catalog import _db_message
+
+    assert _db_message(RuntimeError(1146, "Table 'ainovel.books' doesn't exist")) == (
+        "Table 'ainovel.books' doesn't exist"
+    )
+
+
 def test_database_deadlock_is_retried(monkeypatch):
     import pymysql.err
 
