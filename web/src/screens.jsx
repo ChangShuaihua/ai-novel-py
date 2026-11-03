@@ -905,7 +905,7 @@ function shelfTitle(book) {
   return folderName(book.directory)
 }
 
-function StudioFrame({ here, title, seal, lede, active, onLeave, children }) {
+export function StudioFrame({ here, title, seal, lede, active, onLeave, children }) {
   const { library, setLibrary } = useLibrary()
   const [basketError, setBasketError] = useState("")
 

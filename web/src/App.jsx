@@ -29,17 +29,17 @@ function Studio({ onLeave }) {
   if (route.path === "/new") return <NewBook directory={route.directory} onLeave={onLeave} />
   if (route.path === "/desk") return <DeskScreen directory={route.directory} onLeave={onLeave} />
   if (route.path === "/model") return <ModelScreen onLeave={onLeave} />
+  if (route.path === "/pass") return <PasswordScreen onLeave={onLeave} />
   const painted = route.path === "/read" || route.path === "/listing"
   return (
     <div className={painted ? "room painted" : "room"}>
       <Lintel here={SCREEN[route.path]}>
         <div className="appbar-actions">
           {route.path === "/model" ? null : <a className="appbar-model" href="#/model">接入模型</a>}
-          {route.path === "/pass" ? null : <a className="appbar-model" href="#/pass">改密码</a>}
+          <a className="appbar-model" href="#/pass">改密码</a>
           <button type="button" className="appbar-leave" onClick={onLeave}>离开</button>
         </div>
       </Lintel>
-      {route.path === "/pass" ? <PasswordScreen /> : null}
       {route.path === "/read" ? <Reader directory={route.directory} /> : null}
       {route.path === "/import" ? <ImportScreen directory={route.directory} /> : null}
       {route.path === "/listing" ? <ListingScreen directory={route.directory} /> : null}

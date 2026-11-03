@@ -1,6 +1,7 @@
 import { useState } from "react"
 
 import { changePassword, currentUsername, login, register } from "./api.js"
+import { StudioFrame } from "./screens.jsx"
 
 const REMEMBER = "ainovel-account"
 
@@ -213,7 +214,7 @@ function EyeIcon({ off }) {
   )
 }
 
-export function PasswordScreen() {
+export function PasswordScreen({ onLeave }) {
   const [username, setUsername] = useState(currentUsername)
   const [current, setCurrent] = useState("")
   const [password, setPassword] = useState("")
@@ -250,11 +251,8 @@ export function PasswordScreen() {
   }
 
   return (
-    <main className="page narrow">
-      <p className="eyebrow"><a href="#/">书架</a></p>
-      <h1>改密码</h1>
-      <p className="lede">换过之后，这一页继续留着。别处已经登录的页面要重新进入。</p>
-      <form className="model-form" onSubmit={submit}>
+    <StudioFrame here="改密码" title="改密码" seal="密" lede="换过之后，这一页继续留着。别处已经登录的页面要重新进入。" active="" onLeave={onLeave}>
+      <form className="manuscript pass-form" onSubmit={submit}>
         <label>
           用户名
           <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required maxLength={40} />
@@ -275,6 +273,6 @@ export function PasswordScreen() {
         {notice ? <p className="banner ok" role="status">{notice}</p> : null}
         <button className="signal" type="submit" disabled={busy || !username.trim() || !current || password.length < 8 || again.length < 8}>保存</button>
       </form>
-    </main>
+    </StudioFrame>
   )
 }

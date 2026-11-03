@@ -2533,6 +2533,13 @@ button.signal:disabled {
   margin: 0;
 }
 
+.pass-form {
+  display: grid;
+  gap: 18px;
+}
+
+.pass-form .signal { justify-self: start; }
+
 .hall-sheet .manuscript > .manuscript-field:first-child { margin-top: 0; }
 
 .manuscript {
