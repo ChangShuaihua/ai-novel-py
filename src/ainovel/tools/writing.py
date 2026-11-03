@@ -1,5 +1,7 @@
 """写作者工具。顺序由前置条件卡住，提交用冻结的在途意图恢复。"""
 
+import json
+
 from ainovel.domain.checkpoint import chapter_scope
 from ainovel.domain.commit import CommitStage, PendingCommit
 from ainovel.domain.progress import Progress
@@ -73,18 +75,25 @@ def edit_chapter(book: Book, args: dict) -> dict:
 
 
 def check_consistency(book: Book, args: dict) -> dict:
+    """交还对照事实。不判分，也不因缺名字拒绝提交。"""
     chapter = _chapter(args)
     draft = read_text(book.root, draft_path(chapter))
     if draft is None:
         raise ToolConflict(f"第 {chapter} 章还没有草稿，不能做一致性检查")
-    names = _character_names(book)
-    missing = [name for name in names if name and name not in draft]
+    plan = read_json(book.root, plan_path(chapter))
+    named = []
+    if isinstance(plan, dict):
+        named = [str(name) for name in plan.get("characters") or [] if str(name).strip()]
     digest = digest_text(draft)
     remember(book, chapter_scope(chapter), "consistency_check", "", digest)
+    rules = read_json(book.root, "world_rules.json")
     return {
         "chapter": chapter,
-        "consistent": not missing,
-        "missing_characters": missing,
+        "plan_characters_absent": [name for name in named if name not in draft],
+        "open_foreshadows": _earlier_rows(book, "meta/foreshadow.jsonl", chapter, _open_foreshadow),
+        "timeline": _earlier_rows(book, "timeline.jsonl", chapter),
+        "world_rules": rules if isinstance(rules, list) else [],
+        "state_changes": _earlier_rows(book, "meta/state_changes.jsonl", chapter),
         "next_step": "commit_chapter",
     }
 
@@ -307,11 +316,30 @@ def _required_text(args: dict, key: str) -> str:
     return value.strip()
 
 
-def _character_names(book: Book) -> list[str]:
-    raw = read_json(book.root, "characters.json")
-    if not isinstance(raw, list):
+def _earlier_rows(book: Book, relative: str, chapter: int, keep=None) -> list[dict]:
+    text = read_text(book.root, relative)
+    if not text:
         return []
-    return [str(item.get("name") or "") for item in raw if isinstance(item, dict)]
+    rows = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ToolConflict(f"{relative} 有无法解析的记录") from exc
+        if not isinstance(item, dict) or int(item.get("chapter") or 0) >= chapter:
+            continue
+        if keep is not None and not keep(item):
+            continue
+        rows.append(item)
+    return rows[-12:]
+
+
+def _open_foreshadow(item: dict) -> bool:
+    if item.get("resolved"):
+        return False
+    return str(item.get("status") or "") not in ("resolved", "closed")
 
 
 def _tagged(rows, chapter: int) -> list[dict]:

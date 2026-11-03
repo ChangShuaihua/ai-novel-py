@@ -44,6 +44,7 @@ class ToolCall(BaseModel):
 
 class Completion(BaseModel):
     content: str = ""
+    reasoning: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     stop_reason: str = ""
 

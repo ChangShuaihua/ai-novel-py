@@ -68,6 +68,7 @@ class Worker:
             required_steps=self.steps_for(task),
             block_message=self.message_for(task),
             max_turns=self.max_turns if max_turns is None else max_turns,
+            isolate_stop=self.name == "writer",
         )
 
 

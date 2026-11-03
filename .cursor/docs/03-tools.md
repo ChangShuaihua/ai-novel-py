@@ -69,7 +69,7 @@
 
 ### `audit_foundation`
 
-设定文件齐全之后，规划师重读 `novel_context` 里的工件和指纹，审查跨文件是否矛盾，再调用本工具记下审查结果。有问题先改设定再审。这是规划期缺项 `foundation_audit` 的完成动作。
+设定文件齐全之后，规划师重读 `novel_context` 里的工件，把 `foundation_status.fingerprint` 原样传回。指纹必须与当前书名、前提、大纲、分层大纲、指南针、角色和世界规则一致，否则拒绝。`ready=false` 时必须带 `issues`，不写审查记录，也不进入写作。`ready=true` 时 `notes` 不能为空，且不能再带 `issues`；通过后写入 `meta/foundation_audit.json` 并把阶段改为 `writing`。规划期若记录里的指纹已对不上当前文件，缺项仍是 `foundation_audit`。写作开始后不再重跑这次审查。
 
 ### `plan_chapter`
 
@@ -85,7 +85,7 @@
 
 ### `check_consistency`
 
-对照角色状态、时间线、伏笔做只读检查，结果放在返回值里，不另存工件。步骤 `consistency_check`。必须在本章草稿落盘之后。
+读取本章草稿后返回事实，不另存工件，也不打分：计划里点名但草稿没出现的角色、本章之前仍未收的伏笔、近期时间线、世界规则、状态变化。步骤 `consistency_check`。必须在本章草稿落盘之后。写作者要单独调用它，读完结果再提交；是否改稿由模型判断。提交只要求这次检查的检查点对得上当前草稿。
 
 ### `commit_chapter`
 

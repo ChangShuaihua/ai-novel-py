@@ -91,8 +91,17 @@ _SPECS: dict[str, ToolSpec] = {
     ),
     "audit_foundation": ToolSpec(
         name="audit_foundation",
-        description="设定文件齐全后记下审查结果。",
-        parameters={"type": "object", "properties": {"notes": {"type": "string"}}, "required": []},
+        description="对照 foundation_status.fingerprint 审查设定。ready 为 false 时不放行；ready 为 true 且指纹一致才进入写作。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "ready": {"type": "boolean"},
+                "fingerprint": {"type": "string"},
+                "notes": {"type": "string"},
+                "issues": {"type": "array"},
+            },
+            "required": ["ready", "fingerprint"],
+        },
     ),
     "expand_next_arc": ToolSpec(
         name="expand_next_arc",
@@ -152,7 +161,7 @@ _SPECS: dict[str, ToolSpec] = {
     ),
     "check_consistency": ToolSpec(
         name="check_consistency",
-        description="对照已落盘的草稿做一致性检查。",
+        description="返回计划中缺席的角色、未收伏笔、近期时间线、世界规则和状态变化。这些是事实，不判分。提交前必须单独调用。",
         parameters={"type": "object", "properties": {"chapter": {"type": "integer"}}, "required": ["chapter"]},
     ),
     "commit_chapter": ToolSpec(

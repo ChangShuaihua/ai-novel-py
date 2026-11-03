@@ -1155,8 +1155,14 @@ export function NewBook({ directory, onLeave }) {
     setBusy("synopsis")
     setError("")
     try {
+      const styleName = styleOptions.find(([item]) => item === style)?.[1] || ""
+      const note = [
+        styleName && styleName !== "不附加" && styleName !== "自定义" ? `文风：${styleName}` : "",
+        styleText.trim(),
+      ].filter(Boolean).join("\n")
       const result = await composeSynopsis({
         title: title.trim(),
+        note,
         current: synopsis.trim(),
       })
       setSynopsis(String(result.synopsis || "").slice(0, 1000))

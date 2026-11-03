@@ -6,6 +6,7 @@ import pytest
 from ainovel.domain.commit import CommitStage, PendingCommit
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
+from ainovel.flow.load import foundation_fingerprint, foundation_missing
 from ainovel.store.book import Book
 from ainovel.tools import call_tool
 from ainovel.tools.errors import ToolArgsError, ToolConflict
@@ -287,6 +288,88 @@ def test_save_foundation_types_and_complete_conditions(tmp_path: Path):
     )
     with pytest.raises(ToolConflict, match="未写章节"):
         call_tool(fresh, "save_foundation", {"type": "complete_book", "content": {}, "reason": "太早"})
+
+
+def test_consistency_returns_continuity_facts_and_still_allows_commit(tmp_path: Path):
+    book = _book(tmp_path)
+    _write_chapter(book)
+    (tmp_path / "characters.json").write_text(
+        json.dumps([{"name": "林舟"}, {"name": "阿茶"}, {"name": "老周"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "world_rules.json").write_text(
+        json.dumps([{"rule": "门后有路"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "timeline.jsonl").write_text(
+        json.dumps({"chapter": 1, "event": "旧事"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "meta" / "foreshadow.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"chapter": 1, "text": "门后有人", "status": "open"}, ensure_ascii=False),
+                json.dumps({"chapter": 1, "text": "雨停了", "status": "resolved"}, ensure_ascii=False),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "meta" / "state_changes.jsonl").write_text(
+        json.dumps({"chapter": 1, "name": "林舟", "change": "受伤"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    call_tool(book, "plan_chapter", {"chapter": 2, "goal": "再推门", "characters": ["林舟", "阿茶"]})
+    call_tool(book, "draft_chapter", {"chapter": 2, "content": "林舟又站在门口。"})
+    result = call_tool(book, "check_consistency", {"chapter": 2})
+    assert result["plan_characters_absent"] == ["阿茶"]
+    assert result["open_foreshadows"] == [{"chapter": 1, "text": "门后有人", "status": "open"}]
+    assert result["timeline"] == [{"chapter": 1, "event": "旧事"}]
+    assert result["world_rules"] == [{"rule": "门后有路"}]
+    assert result["state_changes"] == [{"chapter": 1, "name": "林舟", "change": "受伤"}]
+    assert "consistent" not in result
+    committed = call_tool(book, "commit_chapter", {"chapter": 2, "summary": "又到门口"})
+    assert committed["committed"] is True
+
+
+def test_audit_rejects_a_stamp_until_the_fingerprint_matches(tmp_path: Path):
+    book = Book.open(tmp_path, writable=True)
+    book.progress.save(Progress(phase=Phase.INIT, flow=FlowState.WRITING))
+    call_tool(book, "save_book", {"title": "推门", "synopsis": "林舟推开一扇门。"})
+    call_tool(book, "save_foundation", {"type": "premise", "content": "林舟要回家。"})
+    call_tool(book, "save_foundation", {"type": "outline", "content": [{"title": "开端"}]})
+    call_tool(book, "save_foundation", {"type": "characters", "content": [{"name": "林舟"}]})
+    call_tool(book, "save_foundation", {"type": "world_rules", "content": [{"rule": "门后有路"}]})
+    current = foundation_fingerprint(tmp_path)
+    with pytest.raises(ToolArgsError, match="ready"):
+        call_tool(book, "audit_foundation", {"notes": "设定一致", "fingerprint": current})
+    with pytest.raises(ToolConflict, match="fingerprint"):
+        call_tool(book, "audit_foundation", {"ready": True, "notes": "设定一致", "fingerprint": "sha256:nope"})
+    refused = call_tool(
+        book,
+        "audit_foundation",
+        {"ready": False, "fingerprint": current, "issues": [{"file": "premise.md", "problem": "结局和角色目标相反"}]},
+    )
+    assert refused["foundation_ready"] is False
+    assert not (tmp_path / "meta" / "foundation_audit.json").exists()
+    progress = book.progress.load()
+    assert progress is not None and progress.phase != Phase.WRITING
+    assert "foundation_audit" in foundation_missing(tmp_path)
+    with pytest.raises(ToolArgsError, match="notes"):
+        call_tool(book, "audit_foundation", {"ready": True, "fingerprint": current, "notes": "  "})
+    ready = call_tool(
+        book,
+        "audit_foundation",
+        {"ready": True, "fingerprint": current, "notes": "前提、角色和规则一致"},
+    )
+    assert ready["foundation_ready"] is True
+    progress = book.progress.load()
+    assert progress is not None and progress.phase == Phase.WRITING
+    (tmp_path / "premise.md").write_text("林舟改了主意。", encoding="utf-8")
+    assert "foundation_audit" not in foundation_missing(tmp_path)
+    progress.phase = Phase.OUTLINE
+    book.progress.save(progress)
+    assert "foundation_audit" in foundation_missing(tmp_path)
 
 
 def test_arc_review_rejects_chapters_outside_span(tmp_path: Path):

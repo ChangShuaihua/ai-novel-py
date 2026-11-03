@@ -1,5 +1,6 @@
 """路由的读盘边界。Route 不调用这里。"""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -109,9 +110,32 @@ def foundation_missing(root: Path) -> list[str]:
     phase = ""
     if isinstance(progress, dict):
         phase = str(progress.get("phase") or "")
-    if phase not in (Phase.WRITING, Phase.COMPLETE) and not (root / "meta" / "foundation_audit.json").exists():
+    if phase not in (Phase.WRITING, Phase.COMPLETE) and not _audit_matches(root):
         missing.append("foundation_audit")
     return missing
+
+
+_FINGERPRINT_FILES = (
+    "meta/book.json",
+    "premise.md",
+    "outline.json",
+    "layered_outline.json",
+    "meta/compass.json",
+    "characters.json",
+    "world_rules.json",
+)
+
+
+def foundation_fingerprint(root: Path) -> str:
+    """设定原文的指纹。分层大纲和指南针也算在内，改任一文件指纹就变。"""
+    chunks = [_optional_text(root / relative) or "" for relative in _FINGERPRINT_FILES]
+    digest = hashlib.sha256("\n".join(chunks).encode("utf-8")).hexdigest()
+    return "sha256:" + digest
+
+
+def _audit_matches(root: Path) -> bool:
+    audit = _optional_json(root / "meta" / "foundation_audit.json")
+    return isinstance(audit, dict) and audit.get("fingerprint") == foundation_fingerprint(root)
 
 
 def _refresh(kind: str, boundary) -> AggregateRefresh:

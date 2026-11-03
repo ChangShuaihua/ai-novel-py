@@ -209,7 +209,7 @@ class Desk:
             prompt += f"\n可以参考这些内容：\n{extra}"
         if existing:
             prompt += f"\n现有简介，可以重写得更清楚：\n{existing}"
-        client = transport or LiteLLMTransport(idle_timeout=40)
+        client = transport or LiteLLMTransport(idle_timeout=120)
         try:
             result = client.complete(
                 ModelRef(
@@ -220,12 +220,11 @@ class Desk:
                 ),
                 [{"role": "user", "content": prompt}],
                 [],
-                max_tokens=500,
+                max_tokens=4000,
             )
         except ProviderError as exc:
             raise DeskError(_probe_error(exc, config.api_key)) from exc
-        lines = [" ".join(line.split()) for line in (result.content or "").splitlines()]
-        text = "\n".join(line for line in lines if line).strip()
+        text = _synopsis_text(result)
         if not text:
             raise DeskError("模型没有写出简介。")
         if len(text) > 1000:
@@ -1005,6 +1004,31 @@ def _export_name(name: str) -> str:
     stem = cleaned[:-4] if cleaned.lower().endswith(".txt") else cleaned
     stem = stem.strip().strip(".") or "小说"
     return f"{stem[:60]}.txt"
+
+
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_OPEN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+
+
+def _synopsis_text(result) -> str:
+    """正文优先。思考模型把简介留在 reasoning 里时，取最后一段。"""
+    text = _plain_synopsis(getattr(result, "content", "") or "")
+    if text:
+        return text
+    thought = _plain_synopsis(getattr(result, "reasoning", "") or "")
+    if not thought:
+        return ""
+    parts = [part for part in thought.split("\n") if part]
+    chosen = parts[-1]
+    if len(chosen) < 40 and len(parts) > 1:
+        chosen = f"{parts[-2]}\n{chosen}"
+    return chosen
+
+
+def _plain_synopsis(raw: str) -> str:
+    stripped = _THINK_OPEN.sub("", _THINK.sub("", raw))
+    lines = [" ".join(line.split()) for line in stripped.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
 
 
 def _probe_error(exc: ProviderError, api_key: str) -> str:

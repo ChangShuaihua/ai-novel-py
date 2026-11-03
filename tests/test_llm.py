@@ -123,7 +123,23 @@ def test_stream_aggregates_split_tool_arguments():
     assert seen == ["先", "说"]
     assert completion.stop_reason == "tool_calls"
     assert completion.tool_calls[0].name == "echo"
+    assert completion.reasoning == ""
     assert json.loads(completion.tool_calls[0].arguments) == {"n": 1}
+
+
+def test_stream_keeps_reasoning_apart_from_content():
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "先想钩子。"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "雨夜醒来。"}, "finish_reason": "stop"}]},
+    ]
+    completion = aggregate_chunks(chunks)
+    assert completion.content == "雨夜醒来。"
+    assert completion.reasoning == "先想钩子。"
+    message = {"choices": [{"message": {"reasoning": "只有思考。"}, "finish_reason": "length"}]}
+    thought = aggregate_chunks([message])
+    assert thought.content == ""
+    assert thought.reasoning == "只有思考。"
+    assert thought.stop_reason == "length"
 
 
 def test_stream_idle_times_out():

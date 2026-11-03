@@ -48,6 +48,7 @@ def run_agent(
     max_turns: int = 32,
     max_consecutive_blocks: int = 3,
     max_stream_idle: int = 7,
+    isolate_stop: bool = False,
 ) -> AgentResult:
     allowed = {spec.name for spec in tool_specs}
     tools = [spec.to_openai() for spec in sorted(tool_specs, key=lambda spec: spec.name)]
@@ -81,7 +82,14 @@ def run_agent(
         messages.append(_assistant(completion))
         stop_tool = ""
         if completion.tool_calls:
-            stop_tool = _run_tools(completion, allowed, call_tool, messages, stop_after)
+            stop_tool = _run_tools(
+                completion,
+                allowed,
+                call_tool,
+                messages,
+                stop_after,
+                isolate_stop=isolate_stop,
+            )
             if not stop_tool:
                 continue
         try:
@@ -104,9 +112,31 @@ def _finish_or_continue(guard: CheckpointGuard, messages: list[dict]) -> None:
     raise _Continue()
 
 
-def _run_tools(completion: Completion, allowed: set[str], call_tool, messages: list[dict], stop_after: tuple[str, ...]) -> str:
+def _run_tools(
+    completion: Completion,
+    allowed: set[str],
+    call_tool,
+    messages: list[dict],
+    stop_after: tuple[str, ...],
+    *,
+    isolate_stop: bool = False,
+) -> str:
+    calls = list(completion.tool_calls)
+    defer_stop = isolate_stop and len(calls) > 1 and any(call.name in stop_after for call in calls)
     stop_tool = ""
-    for call in completion.tool_calls:
+    for call in calls:
+        if defer_stop and call.name in stop_after:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": json.dumps(
+                        {"error": "先阅读本轮其他工具的结果，下一轮再单独调用这个结束工具。"},
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+            continue
         if call.name not in allowed:
             payload = {"error": f"工具不在本轮允许列表: {call.name}"}
             ok = False

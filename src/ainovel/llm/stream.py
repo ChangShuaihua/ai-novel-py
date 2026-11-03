@@ -23,6 +23,7 @@ def read_until_idle(source: Iterator[Any], idle_timeout: float | None) -> list[A
 
 def aggregate_chunks(chunks: list[Any], on_delta=None) -> Completion:
     content: list[str] = []
+    reasoning: list[str] = []
     calls: dict[int, dict[str, str]] = {}
     stop_reason = ""
     for chunk in chunks:
@@ -39,6 +40,9 @@ def aggregate_chunks(chunks: list[Any], on_delta=None) -> Completion:
                 text = _get(message, "content")
                 if text:
                     content.append(str(text))
+                thought = _thought(message)
+                if thought:
+                    reasoning.append(thought)
                 _absorb_calls(calls, _get(message, "tool_calls"))
             continue
         text = _get(delta, "content")
@@ -46,13 +50,21 @@ def aggregate_chunks(chunks: list[Any], on_delta=None) -> Completion:
             content.append(str(text))
             if on_delta is not None:
                 on_delta(str(text))
+        thought = _thought(delta)
+        if thought:
+            reasoning.append(thought)
         _absorb_calls(calls, _get(delta, "tool_calls"))
     tool_calls = [
         ToolCall(id=item["id"], name=item["name"], arguments=item["arguments"])
         for _, item in sorted(calls.items())
         if item["name"]
     ]
-    return Completion(content="".join(content), tool_calls=tool_calls, stop_reason=stop_reason)
+    return Completion(
+        content="".join(content),
+        reasoning="".join(reasoning),
+        tool_calls=tool_calls,
+        stop_reason=stop_reason,
+    )
 
 
 def _next_within(source: Iterator[Any], timeout: float) -> Any:
@@ -104,6 +116,14 @@ def _absorb_calls(calls: dict[int, dict[str, str]], raw: Any) -> None:
         arguments = _get(function, "arguments")
         if arguments:
             current["arguments"] += str(arguments)
+
+
+def _thought(obj: Any) -> str:
+    for key in ("reasoning_content", "reasoning"):
+        text = _get(obj, key)
+        if text:
+            return str(text)
+    return ""
 
 
 def _get(obj: Any, key: str) -> Any:

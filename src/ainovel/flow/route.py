@@ -25,8 +25,9 @@ def route(state: RouteState) -> Instruction | None:
             if state.foundation_missing == ["foundation_audit"]:
                 task = (
                     "基础设定已齐全：重新调用 novel_context 读取全部已落盘工件与 "
-                    "foundation_status.fingerprint，审查跨文件语义一致性后调用 audit_foundation；"
-                    "有问题先修正并重新审查"
+                    "foundation_status.fingerprint，审查跨文件语义一致性后调用 audit_foundation。"
+                    "有冲突则 ready=false 并给出 issues，改完工件后用新指纹再审；"
+                    "确认无冲突才 ready=true，此时才进入写作"
                 )
             return Instruction(
                 agent=_planner(state.planning_tier),

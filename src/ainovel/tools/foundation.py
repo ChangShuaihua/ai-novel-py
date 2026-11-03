@@ -83,14 +83,41 @@ def save_foundation(book: Book, args: dict) -> dict:
 
 
 def audit_foundation(book: Book, args: dict) -> dict:
-    from ainovel.flow.load import foundation_missing
+    from ainovel.flow.load import foundation_fingerprint, foundation_missing
 
     missing = [item for item in foundation_missing(book.root) if item != "foundation_audit"]
     if missing:
         raise ToolConflict("基础设定仍缺：" + "、".join(missing))
-    record = {"notes": str(args.get("notes") or ""), "fingerprint": _fingerprint(book)}
+    current = foundation_fingerprint(book.root)
+    given = args.get("fingerprint")
+    if not isinstance(given, str) or given != current:
+        raise ToolConflict(
+            "fingerprint 与当前设定不一致。重新调用 novel_context，把 foundation_status.fingerprint 原样传回"
+        )
+    ready = args.get("ready")
+    if not isinstance(ready, bool):
+        raise ToolArgsError("ready 必须是布尔值")
+    issues = args.get("issues") or []
+    if not isinstance(issues, list):
+        raise ToolArgsError("issues 必须是数组")
+    if not ready:
+        if not issues:
+            raise ToolArgsError("ready 为 false 时必须给出 issues")
+        return {
+            "audited": False,
+            "foundation_ready": False,
+            "issues": issues,
+            "fingerprint": current,
+            "next_step": "save_foundation",
+        }
+    if issues:
+        raise ToolArgsError("ready 为 true 时不能带 issues")
+    notes = str(args.get("notes") or "").strip()
+    if not notes:
+        raise ToolArgsError("notes 不能为空")
+    record = {"notes": notes, "fingerprint": current, "ready": True}
     write_json(book.root, "meta/foundation_audit.json", record)
-    remember(book, global_scope(), "foundation_audit", "meta/foundation_audit.json", digest_text(record["fingerprint"]))
+    remember(book, global_scope(), "foundation_audit", "meta/foundation_audit.json", digest_text(current))
     progress = book.progress.load() or Progress(phase=Phase.WRITING, flow=FlowState.WRITING)
     if progress.phase not in (Phase.WRITING, Phase.COMPLETE):
         progress.phase = Phase.WRITING
@@ -101,7 +128,7 @@ def audit_foundation(book: Book, args: dict) -> dict:
         "audited": True,
         "foundation_ready": True,
         "phase": Phase.WRITING.value,
-        "fingerprint": record["fingerprint"],
+        "fingerprint": current,
         "next_step": "novel_context",
     }
 
@@ -305,13 +332,6 @@ def _artifact(kind: str) -> str:
         "update_compass": "meta/compass.json",
         "complete_book": "meta/progress.json",
     }[kind]
-
-
-def _fingerprint(book: Book) -> str:
-    chunks = []
-    for relative in ("meta/book.json", "premise.md", "outline.json", "characters.json", "world_rules.json"):
-        chunks.append(read_text(book.root, relative) or "")
-    return digest_text("\n".join(chunks))
 
 
 def _has_skeleton(book: Book) -> bool:

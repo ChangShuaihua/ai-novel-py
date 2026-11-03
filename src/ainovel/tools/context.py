@@ -3,7 +3,7 @@
 import json
 
 from ainovel.domain.context import context_profile
-from ainovel.flow.load import foundation_missing
+from ainovel.flow.load import foundation_fingerprint, foundation_missing
 from ainovel.flow.outline import check_arc_boundary, repair_indexes
 from ainovel.rules import check_text, load_snapshot, payload as rules_payload
 from ainovel.store.book import Book
@@ -22,7 +22,10 @@ def novel_context(book: Book, args: dict) -> dict:
     arc = args.get("arc")
     snapshot = load_snapshot(book.root)
     payload = {
-        "foundation_status": {"missing": foundation_missing(book.root)},
+        "foundation_status": {
+            "missing": foundation_missing(book.root),
+            "fingerprint": foundation_fingerprint(book.root),
+        },
         "user_rules": rules_payload(snapshot),
         "summary_window": profile.summary_window,
         "timeline_window": profile.timeline_window,

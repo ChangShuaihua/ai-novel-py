@@ -8,6 +8,7 @@ from ainovel.agents.loop import AgentResult
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
 from ainovel.entry.headless import main
+from ainovel.flow.load import foundation_fingerprint
 from ainovel.host.config import ConfigError
 from ainovel.host.engine import Engine
 from ainovel.host.host import Host, HostError
@@ -110,7 +111,11 @@ class Script:
                 "content": {"ending_direction": "回家", "open_threads": ["门后的路"]},
             }
         if not (root / "meta" / "foundation_audit.json").is_file():
-            return "audit_foundation", {"notes": "设定一致"}
+            return "audit_foundation", {
+                "ready": True,
+                "notes": "设定一致",
+                "fingerprint": foundation_fingerprint(root),
+            }
         return "expand_next_arc", {
             "title": "上路",
             "goal": "离开门口",

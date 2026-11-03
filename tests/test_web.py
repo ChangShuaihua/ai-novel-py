@@ -344,13 +344,22 @@ def test_synopsis_uses_the_saved_model(tmp_path: Path):
         def complete(self, model, messages, tools, max_tokens=None):
             seen["key"] = model.api_key
             seen["prompt"] = messages[0]["content"]
+            seen["max_tokens"] = max_tokens
             return Completion(content="雨夜醒来的人，发现城里的灯都灭了。")
 
     result = desk.compose_synopsis("雨夜", "他不记得自己的名字", transport=Transport())
     assert result["synopsis"].startswith("雨夜醒来")
     assert seen["key"] == "sk-test-secret-value"
+    assert seen["max_tokens"] == 4000
     assert "他不记得自己的名字" in seen["prompt"]
     assert json.loads(config.read_text(encoding="utf-8"))["api_key"] == "sk-test-secret-value"
+
+    class Thinking:
+        def complete(self, model, messages, tools, max_tokens=None):
+            return Completion(content="<think>先想钩子</think>", reasoning="雨夜的人忘了名字。\n城里的灯一盏盏灭了，他却记得门后有人在等。")
+
+    thought = desk.compose_synopsis("雨夜", transport=Thinking())
+    assert thought["synopsis"] == "雨夜的人忘了名字。\n城里的灯一盏盏灭了，他却记得门后有人在等。"
     with pytest.raises(DeskError, match="标题"):
         desk.compose_synopsis("  ")
 

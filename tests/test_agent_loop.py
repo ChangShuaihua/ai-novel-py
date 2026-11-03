@@ -92,6 +92,39 @@ def test_scripted_model_stops_after_successful_commit(tmp_path: Path):
     assert any(row.step == "commit" for row in book.checkpoints.all())
 
 
+def test_commit_batched_with_check_waits_until_the_next_turn(tmp_path: Path):
+    book = _book(tmp_path)
+    call_tool(book, "plan_chapter", {"chapter": 1, "goal": "进门"})
+    call_tool(book, "draft_chapter", {"chapter": 1, "content": "林舟推开门。"})
+    batched = Completion(
+        tool_calls=[
+            ToolCall(id="check", name="check_consistency", arguments=json.dumps({"chapter": 1})),
+            ToolCall(
+                id="commit",
+                name="commit_chapter",
+                arguments=json.dumps({"chapter": 1, "summary": "林舟进了门"}),
+            ),
+        ]
+    )
+    script = _Script([batched, _call("commit_chapter", {"chapter": 1, "summary": "林舟进了门"}, "commit")])
+    result = run_agent(
+        script,
+        system_prompt="短提示",
+        task="写第 1 章",
+        tool_specs=_specs("check_consistency", "commit_chapter"),
+        call_tool=lambda name, args: call_tool(book, name, args),
+        checkpoints=book.checkpoints,
+        stop_after=("commit_chapter",),
+        required_steps=("commit",),
+        block_message="还没提交",
+        isolate_stop=True,
+    )
+    assert result.stop_tool == "commit_chapter"
+    assert script.calls == 2
+    assert "先阅读" in script.seen[1][-1]["content"]
+    assert (tmp_path / "chapters" / "01.md").read_text(encoding="utf-8") == "林舟推开门。"
+
+
 def test_ending_without_checkpoint_is_refused(tmp_path: Path):
     book = _book(tmp_path)
     script = _Script([Completion(content="我写完了")] * 3)
