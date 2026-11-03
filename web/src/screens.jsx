@@ -1009,7 +1009,6 @@ export function NewBook({ directory, onLeave }) {
   const draftNote = saved != null && Object.prototype.hasOwnProperty.call(saved, "styleText")
   const [title, setTitle] = useState(saved?.title || "")
   const [synopsis, setSynopsis] = useState(saved?.synopsis || "")
-  const [chapter, setChapter] = useState(saved?.chapter || "")
   const [style, setStyle] = useState(draftStyle ? saved.style : "")
   const [styleText, setStyleText] = useState(draftNote ? saved.styleText : "")
   const [keepDraft, setKeepDraft] = useState(Boolean(saved?.keep))
@@ -1041,10 +1040,10 @@ export function NewBook({ directory, onLeave }) {
       localStorage.removeItem(DRAFT_KEY)
       return
     }
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ title, synopsis, chapter, style, styleText, keep: true }))
-  }, [keepDraft, title, synopsis, chapter, style, styleText])
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ title, synopsis, style, styleText, keep: true }))
+  }, [keepDraft, title, synopsis, style, styleText])
 
-  const seed = [chapter.trim(), synopsis.trim(), title.trim()].filter(Boolean).join("\n")
+  const seed = [synopsis.trim(), title.trim()].filter(Boolean).join("\n")
   const styleOptions = STYLE_OPTIONS.some(([value]) => value === style) || !style
     ? STYLE_OPTIONS
     : [[style, style], ...STYLE_OPTIONS]
@@ -1059,7 +1058,6 @@ export function NewBook({ directory, onLeave }) {
     try {
       const result = await composeSynopsis({
         title: title.trim(),
-        note: chapter.trim(),
         current: synopsis.trim(),
       })
       setSynopsis(String(result.synopsis || "").slice(0, 1000))
@@ -1074,7 +1072,7 @@ export function NewBook({ directory, onLeave }) {
     event?.preventDefault()
     if (busy) return
     if (!seed) {
-      setError("先写下标题、简介，或这一章想写的内容。")
+      setError("先写下标题或简介。")
       return
     }
     setBusy("start")
@@ -1150,12 +1148,6 @@ export function NewBook({ directory, onLeave }) {
             />
           </Field>
         ) : null}
-        <Field
-          label="章节内容"
-          extra={<button type="button" className="field-ai" disabled={Boolean(busy) || !seed} onClick={submit}>AI 生成</button>}
-        >
-          <textarea value={chapter} rows={8} placeholder="开始写作吧..." disabled={busy} onChange={(event) => setChapter(event.target.value)} />
-        </Field>
         {error ? (
           <p className="banner" role="status">
             {error}{" "}
