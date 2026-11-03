@@ -376,6 +376,29 @@ def test_custom_style_is_given_to_the_writer(tmp_path: Path):
         host.close()
 
 
+def test_custom_note_is_added_after_the_chosen_style(tmp_path: Path):
+    from ainovel.host.host import Host
+
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({
+            "provider": "openai",
+            "model": "gpt-4.1",
+            "api_key": "sk-test-secret-value",
+            "style": "fantasy",
+            "style_text": "全用短句。",
+        }),
+        encoding="utf-8",
+    )
+    host = Host.open(tmp_path / "book", config_path=config, completer=object(), include_home=False)
+    try:
+        prompt = host.workers["writer"].system_prompt
+        assert "奇幻冒险风格" in prompt
+        assert prompt.index("奇幻冒险风格") < prompt.index("全用短句。")
+    finally:
+        host.close()
+
+
 def test_probe_uses_the_saved_key_and_does_not_rewrite_it(tmp_path: Path):
     config = tmp_path / "config.json"
     config.write_text(

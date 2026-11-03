@@ -549,6 +549,7 @@ function Wastebasket({ trash, onRestore, onEmpty }) {
 }
 
 const STYLE_OPTIONS = [
+  ["custom", "自定义"],
   ["", "不附加"],
   ["default", "默认"],
   ["fantasy", "奇幻"],
@@ -559,7 +560,6 @@ const STYLE_OPTIONS = [
   ["urban", "都市"],
   ["scifi", "科幻"],
   ["history", "历史"],
-  ["custom", "自定义"],
 ]
 
 const MODEL_LEDE = "配置你自己的大模型 API，绑定到你的账号，不影响其他账号。"
@@ -1002,6 +1002,105 @@ function readDraft() {
   }
 }
 
+function StylePick({ id, value, options, disabled, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [cursor, setCursor] = useState(0)
+  const rootRef = useRef(null)
+  const listRef = useRef(null)
+  const listId = useId()
+  const current = options.find(([item]) => item === value)
+  const label = current ? current[1] : value
+
+  useEffect(() => {
+    if (!open) return undefined
+    listRef.current?.focus()
+    function onPointer(event) {
+      if (!rootRef.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointer)
+    return () => document.removeEventListener("pointerdown", onPointer)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return undefined
+    listRef.current?.querySelector(".at")?.scrollIntoView({ block: "nearest" })
+    return undefined
+  }, [open, cursor])
+
+  function choose(next) {
+    onChange(next)
+    setOpen(false)
+  }
+
+  function onListKey(event) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault()
+      setCursor((index) => Math.min(options.length - 1, index + 1))
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault()
+      setCursor((index) => Math.max(0, index - 1))
+    } else if (event.key === "Home") {
+      event.preventDefault()
+      setCursor(0)
+    } else if (event.key === "End") {
+      event.preventDefault()
+      setCursor(options.length - 1)
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault()
+      choose(options[cursor][0])
+    } else if (event.key === "Escape") {
+      event.preventDefault()
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div className="style-pick" ref={rootRef}>
+      <button
+        id={id}
+        type="button"
+        className="style-pick-button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listId}
+        disabled={disabled}
+        onClick={() => {
+          setCursor(Math.max(0, options.findIndex(([item]) => item === value)))
+          setOpen((shown) => !shown)
+        }}
+      >
+        <span>{label}</span>
+        <span className="style-pick-mark" aria-hidden="true" />
+      </button>
+      {open ? (
+        <ul
+          id={listId}
+          className="style-pick-menu"
+          role="listbox"
+          tabIndex={-1}
+          ref={listRef}
+          onKeyDown={onListKey}
+        >
+          {options.map(([item, name], index) => (
+            <li key={item || "none"} role="none">
+              <button
+                type="button"
+                role="option"
+                aria-selected={item === value}
+                className={index === cursor ? "at" : undefined}
+                onMouseEnter={() => setCursor(index)}
+                onClick={() => choose(item)}
+              >
+                {name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 export function NewBook({ directory, onLeave }) {
   const linked = String(directory || "").startsWith("db:") ? directory : ""
   const saved = readDraft()
@@ -1044,9 +1143,9 @@ export function NewBook({ directory, onLeave }) {
   }, [keepDraft, title, synopsis, style, styleText])
 
   const seed = [synopsis.trim(), title.trim()].filter(Boolean).join("\n")
-  const styleOptions = STYLE_OPTIONS.some(([value]) => value === style) || !style
+  const styleOptions = STYLE_OPTIONS.some(([item]) => item === style)
     ? STYLE_OPTIONS
-    : [[style, style], ...STYLE_OPTIONS]
+    : [["custom", "自定义"], [style, style], ...STYLE_OPTIONS.filter(([item]) => item !== "custom")]
 
   async function draftSynopsis() {
     if (!title.trim()) {
@@ -1079,9 +1178,9 @@ export function NewBook({ directory, onLeave }) {
     setError("")
     try {
       const settings = await getModel().catch(() => null)
-      const note = style === "custom" ? styleText.trim() : ""
+      const note = styleText.trim()
       const styleChanged = (settings?.style || "") !== style
-      const noteChanged = style === "custom" && (settings?.style_text || "") !== note
+      const noteChanged = (settings?.style_text || "") !== note
       if (settings?.provider && settings?.model && (styleChanged || noteChanged)) {
         await saveModel({
           provider: settings.provider,
@@ -1089,7 +1188,7 @@ export function NewBook({ directory, onLeave }) {
           api_key: "",
           api_base: settings.api_base || "",
           style,
-          style_text: style === "custom" ? note : settings.style_text || "",
+          style_text: note,
           clear_key: false,
         })
       }
@@ -1132,22 +1231,22 @@ export function NewBook({ directory, onLeave }) {
           <textarea value={synopsis} maxLength={1000} rows={4} placeholder="请输入作品简介，支持 Markdown" disabled={Boolean(busy)} onChange={(event) => setSynopsis(event.target.value)} />
         </Field>
         <Field label="文风">
-          <select value={style} disabled={Boolean(busy)} onChange={(event) => setStyle(event.target.value)}>
-            {styleOptions.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}
-          </select>
+          <StylePick value={style} options={styleOptions} disabled={Boolean(busy)} onChange={setStyle} />
         </Field>
-        {style === "custom" ? (
-          <Field label="自定义文风" count={`${styleText.length}/2000`}>
-            <textarea
-              value={styleText}
-              maxLength={2000}
-              rows={4}
-              placeholder="例如：短句，冷一点，少用形容词，对话要像真人。"
-              disabled={Boolean(busy)}
-              onChange={(event) => setStyleText(event.target.value)}
-            />
-          </Field>
-        ) : null}
+        <Field
+          label="自定义文风"
+          count={`${styleText.length}/2000`}
+          hint={style && style !== "custom" ? "写在所选文风后面。" : ""}
+        >
+          <textarea
+            value={styleText}
+            maxLength={2000}
+            rows={4}
+            placeholder="例如：短句，冷一点，少用形容词，对话要像真人。"
+            disabled={Boolean(busy)}
+            onChange={(event) => setStyleText(event.target.value)}
+          />
+        </Field>
         {error ? (
           <p className="banner" role="status">
             {error}{" "}

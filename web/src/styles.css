@@ -2630,6 +2630,66 @@ button.signal:disabled {
 .manuscript textarea,
 .manuscript select { border-bottom-color: #e4d7c6; }
 
+.style-pick { position: relative; }
+
+.style-pick-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 0;
+  border-bottom: 1px solid #e4d7c6;
+  background: transparent;
+  text-align: left;
+}
+
+.style-pick-button:disabled { cursor: default; }
+
+.style-pick-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-right: 1.5px solid #8a7568;
+  border-bottom: 1.5px solid #8a7568;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.style-pick-menu {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  list-style: none;
+  background: #f7f1e6;
+  border: 1px solid #e4d7c6;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(48, 32, 18, 0.14);
+}
+
+.style-pick-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.style-pick-menu button[aria-selected="true"] { font-weight: 600; }
+
+.style-pick-menu button.at,
+.style-pick-menu button:hover {
+  background: #e7cfc6;
+  font-weight: 600;
+}
+
 .field-hint {
   color: #8a7568;
   font-size: 13px;
