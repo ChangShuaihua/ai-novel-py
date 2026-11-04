@@ -63,6 +63,24 @@ class _Shelf:
         if self.state == "trash":
             self.state = "gone"
 
+    def publish(self, public: str, visible: bool = True) -> None:
+        if public != self.public:
+            raise CatalogError("找不到这本书")
+        self.visible = visible
+
+    def public_books(self) -> list[dict]:
+        return [{"directory": self.public, "title": "雨"}] if getattr(self, "visible", False) else []
+
+    def public_book(self, public: str) -> dict:
+        if public != self.public or not getattr(self, "visible", False):
+            raise CatalogError("这本书没有公开")
+        return {"directory": public, "title": "雨", "comments": list(getattr(self, "comments", []))}
+
+    def comment(self, public: str, body: str) -> dict:
+        view = self.public_book(public)
+        self.comments = [*getattr(self, "comments", []), {"body": body}]
+        return {**view, "comments": list(self.comments)}
+
 
 def _stop_model():
     class _Stopped:
@@ -89,6 +107,24 @@ def test_snapshot_does_not_upload_the_book(tmp_path: Path):
     assert desk.snapshot("db:7")["directory"] == "db:7"
     assert desk.snapshot("db:7")["directory"] == "db:7"
     assert shelf.uploads == 0
+    desk.shutdown()
+
+
+def test_public_library_calls_catalog_methods_with_arguments(tmp_path: Path):
+    shelf = _Shelf(tmp_path / "cache")
+    desk = Desk(
+        library_path=tmp_path / "library.json",
+        config_path=tmp_path / "config.json",
+        books_root=tmp_path / "new",
+        catalog=shelf,
+    )
+
+    desk.publish("db:7", True)
+    assert desk.public_library()["books"][0]["title"] == "雨"
+    assert desk.public_book("db:7")["directory"] == "db:7"
+    assert desk.comment("db:7", "很好看")["comments"] == [{"body": "很好看"}]
+    desk.publish("db:7", False)
+    assert desk.public_library()["books"] == []
     desk.shutdown()
 
 

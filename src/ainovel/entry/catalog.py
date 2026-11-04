@@ -36,6 +36,20 @@ CREATE TABLE IF NOT EXISTS book_files (
 ) ENGINE=InnoDB COMMENT='书里的文件。网页新建的书整本存在这里'
 """
 
+_COMMENTS = """
+CREATE TABLE IF NOT EXISTS book_comments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  book_id BIGINT UNSIGNED NOT NULL,
+  user_id CHAR(16) NOT NULL,
+  body VARCHAR(1000) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_book_comments_book (book_id, created_at),
+  CONSTRAINT fk_book_comments_book FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE,
+  CONSTRAINT fk_book_comments_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB COMMENT='公开图书馆的读者评论'
+"""
+
 
 class CatalogError(RuntimeError):
     """数据库拒绝了这次书架操作。"""
@@ -154,7 +168,7 @@ class BookCatalog:
         def work(cur):
             cur.execute(
                 """
-                SELECT id, shelf_state, title, phase, total_chapters, completed_chapters, trashed_at
+                SELECT id, shelf_state, title, phase, total_chapters, completed_chapters, trashed_at, is_public
                 FROM books
                 WHERE user_id=%s
                 ORDER BY updated_at DESC, id DESC
@@ -172,6 +186,131 @@ class BookCatalog:
             else:
                 books.append(spine)
         return books, trash
+
+    def publish(self, public: str, visible: bool = True) -> None:
+        book_id = _book_id(public)
+
+        def work(cur) -> int:
+            cur.execute(
+                "UPDATE books SET is_public=%s, published_at=%s WHERE id=%s AND user_id=%s AND shelf_state='shelf'",
+                (1 if visible else 0, _now() if visible else None, book_id, self.user_id),
+            )
+            return int(cur.rowcount)
+
+        if self._run(work) != 1:
+            raise CatalogError("书架上没有这本书")
+
+    def public_books(self) -> list[dict]:
+        def work(cur):
+            cur.execute(
+                """
+                SELECT b.id, b.title, b.synopsis, b.phase, b.total_chapters,
+                       b.completed_chapters, b.published_at, u.username,
+                       (SELECT COUNT(*) FROM book_comments c WHERE c.book_id=b.id) AS comment_count
+                FROM books b JOIN users u ON u.id=b.user_id
+                WHERE b.is_public=1 AND b.shelf_state='shelf'
+                ORDER BY b.published_at DESC, b.id DESC
+                """
+            )
+            return list(cur.fetchall())
+
+        result = []
+        for row in self._run(work):
+            spine = _spine_row(row)
+            spine.update({
+                "author": str(row.get("username") or ""),
+                "synopsis": str(row.get("synopsis") or ""),
+                "comment_count": int(row.get("comment_count") or 0),
+                "published_at": _iso(row.get("published_at")),
+            })
+            result.append(spine)
+        return result
+
+    def public_book(self, public: str) -> dict:
+        book_id = _book_id(public)
+
+        def work(cur):
+            cur.execute(
+                """
+                SELECT b.id, b.title, b.synopsis, b.phase, b.total_chapters,
+                       b.completed_chapters, u.username
+                FROM books b JOIN users u ON u.id=b.user_id
+                WHERE b.id=%s AND b.is_public=1 AND b.shelf_state='shelf'
+                """,
+                (book_id,),
+            )
+            book = cur.fetchone()
+            if book is None:
+                return None
+            cur.execute(
+                "SELECT relative_path, body FROM book_files WHERE book_id=%s AND relative_path LIKE 'chapters/%%.md'",
+                (book_id,),
+            )
+            files = list(cur.fetchall())
+            cur.execute(
+                """
+                SELECT c.id, c.body, c.created_at, u.username
+                FROM book_comments c JOIN users u ON u.id=c.user_id
+                WHERE c.book_id=%s ORDER BY c.created_at ASC, c.id ASC
+                """,
+                (book_id,),
+            )
+            return book, files, list(cur.fetchall())
+
+        found = self._run(work)
+        if found is None:
+            raise CatalogError("这本书没有公开，或已经下架")
+        row, files, comments = found
+        completed = set(_completed_numbers(row.get("completed_chapters")))
+        chapters = []
+        for item in files:
+            relative = str(item.get("relative_path") or "")
+            name = relative.rsplit("/", 1)[-1].split(".", 1)[0]
+            if not name.isdigit() or int(name) not in completed:
+                continue
+            raw = item.get("body") or b""
+            if isinstance(raw, str):
+                text = raw
+            else:
+                text = bytes(raw).decode("utf-8", errors="replace")
+            title, body = _chapter_text(text)
+            chapters.append({"chapter": int(name), "title": title, "body": body})
+        chapters.sort(key=lambda item: item["chapter"])
+        return {
+            "directory": f"db:{book_id}",
+            "title": str(row.get("title") or ""),
+            "synopsis": str(row.get("synopsis") or ""),
+            "author": str(row.get("username") or ""),
+            "phase": str(row.get("phase") or ""),
+            "total_chapters": int(row.get("total_chapters") or 0),
+            "completed_chapters": sorted(completed),
+            "chapters": chapters,
+            "comments": [
+                {"id": int(item["id"]), "author": str(item.get("username") or ""),
+                 "body": str(item.get("body") or ""), "created_at": _iso(item.get("created_at"))}
+                for item in comments
+            ],
+        }
+
+    def comment(self, public: str, body: str) -> dict:
+        book_id = _book_id(public)
+        text = str(body or "").strip()
+        if not text:
+            raise CatalogError("评论不能为空")
+        if len(text) > 1000:
+            raise CatalogError("评论不能超过 1000 字")
+
+        def work(cur) -> None:
+            cur.execute("SELECT id FROM books WHERE id=%s AND is_public=1 AND shelf_state='shelf'", (book_id,))
+            if cur.fetchone() is None:
+                raise CatalogError("这本书没有公开，或已经下架")
+            cur.execute(
+                "INSERT INTO book_comments (book_id, user_id, body, created_at) VALUES (%s, %s, %s, %s)",
+                (book_id, self.user_id, text, _now()),
+            )
+
+        self._run(work)
+        return self.public_book(public)
 
     def local_root(self, public: str) -> Path:
         """临时目录。只用来看锁，不把正文从数据库里拉出来。"""
@@ -488,7 +627,9 @@ def _ensure_schema() -> None:
             with connection.cursor() as cur:
                 _install_base_schema(cur)
                 cur.execute(_FILES)
+                cur.execute(_COMMENTS)
                 _add_trashed_at(cur)
+                _add_public_columns(cur)
             connection.commit()
         except Exception as exc:
             connection.rollback()
@@ -572,6 +713,7 @@ def _spine_row(row: dict) -> dict:
         "completed_count": completed_count,
         "total_chapters": total if total > 0 else 0,
         "has_progress": started,
+        "is_public": bool(row.get("is_public")),
     }
     if row.get("shelf_state") == "trash":
         due = _purge_at(row.get("trashed_at"))
@@ -661,6 +803,44 @@ def _add_trashed_at(cur) -> None:
     if int(row["n"]) > 0:
         return
     cur.execute("ALTER TABLE books ADD COLUMN trashed_at DATETIME(6) NULL")
+
+
+def _add_public_columns(cur) -> None:
+    for name, definition in (
+        ("is_public", "TINYINT(1) NOT NULL DEFAULT 0"),
+        ("published_at", "DATETIME(6) NULL"),
+    ):
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='books' AND COLUMN_NAME=%s",
+            (name,),
+        )
+        if int(cur.fetchone()["n"]) == 0:
+            cur.execute(f"ALTER TABLE books ADD COLUMN {name} {definition}")
+
+
+def _completed_numbers(raw: object) -> list[int]:
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="replace")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    return [int(item) for item in (raw or []) if not isinstance(item, bool) and str(item).isdigit() and int(item) > 0]
+
+
+def _chapter_text(text: str) -> tuple[str, str]:
+    stripped = text.strip("\n")
+    lines = stripped.splitlines()
+    if lines and lines[0].lstrip().startswith("#"):
+        return lines[0].lstrip("#").strip(), "\n".join(lines[1:]).strip() or stripped
+    return "", stripped
+
+
+def _iso(moment: object) -> str:
+    if not isinstance(moment, datetime):
+        return ""
+    return moment.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _install_base_schema(cur) -> None:

@@ -1,6 +1,6 @@
 import { cloneElement, useEffect, useId, useRef, useState } from "react"
 
-import { bookHref, checkModel, composeSynopsis, currentUsername, emptyTrash, getLibrary, getModel, moveBook, pickSaveFile, saveModel, sendIntent, useSnapshot } from "./api.js"
+import { addComment, bookHref, checkModel, composeSynopsis, currentUsername, emptyTrash, getLibrary, getModel, getPublicBook, getPublicLibrary, moveBook, pickSaveFile, publishBook, saveModel, sendIntent, useSnapshot } from "./api.js"
 import { blocks, deskState } from "./deskState.js"
 import {
   DEFAULT_MODEL,
@@ -133,6 +133,7 @@ function HallMenu({ active, view, onView, trash, onRestore, onEmpty }) {
       ) : (
         <a href="#/"><ShelfIcon /> 我的书架</a>
       )}
+      <a href="#/library" aria-current={active === "library" ? "page" : undefined}><LibraryIcon /> 图书馆</a>
       <a href="#/new" aria-current={active === "new" ? "page" : undefined}><PenIcon /> 新书创作</a>
       {SHELF_VIEWS.filter(([id]) => id !== "all").map(([id, label]) => (
         onShelf ? (
@@ -345,6 +346,15 @@ export function Shelf({ onLeave }) {
                             <button
                               type="button"
                               role="menuitem"
+                              onClick={async () => {
+                                setActionError("")
+                                try { setLibrary(await publishBook(book.directory, !book.is_public)) } catch (reason) { setActionError(reason.message) }
+                                setMenuDir(null)
+                              }}
+                            >{book.is_public ? "从图书馆下架" : "公开到图书馆"}</button>
+                            <button
+                              type="button"
+                              role="menuitem"
                               className="danger"
                               onClick={() => discardBook(book.directory)}
                             >放进废纸篓</button>
@@ -411,6 +421,14 @@ function ShelfIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
       <path d="M8 7V4.5h3V7M13 12V9.5h3V12" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
+function LibraryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4.5 19.5h15M6 18V7l3-2v13M10.5 18V6.5h3V18M15 18V5l3 2v11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -1783,27 +1801,115 @@ function GuideStep({ guide, busy, error, onAct }) {
   )
 }
 
+export function Library({ onLeave }) {
+  const [books, setBooks] = useState(null)
+  const [error, setError] = useState("")
+  const [query, setQuery] = useState("")
+  useEffect(() => {
+    let stop = false
+    getPublicLibrary().then((data) => { if (!stop) setBooks(data.books || []) }).catch((reason) => { if (!stop) setError(reason.message) })
+    return () => { stop = true }
+  }, [])
+  const shown = (books || []).filter((book) => !query.trim() || `${book.title} ${book.author}`.includes(query.trim()))
+  return (
+    <div className="hall">
+      <HallTop here="图书馆" onLeave={onLeave}>
+        <input className="hall-search" value={query} placeholder="搜索书名或作者" aria-label="搜索书名或作者" onChange={(event) => setQuery(event.target.value)} />
+      </HallTop>
+      <div className="hall-stage">
+        <header className="hall-title"><h1>图书馆<span className="hall-seal" aria-hidden="true">阅</span></h1><p>公开作品供所有读者阅读与评论，原稿始终只属于作者。</p></header>
+        {error ? <p className="banner" role="status">{error}</p> : null}
+        <div className="hall-body">
+          <HallMenu active="library" view="all" onView={() => {}} trash={[]} onRestore={() => {}} onEmpty={() => {}} />
+          <section className="public-library" aria-label="公开图书">
+            {books == null && !error ? <Loading message="正在翻阅书目。" /> : null}
+            {books != null && shown.length === 0 ? <div className="library-empty"><EmptyBooks /><p>还没有公开作品。</p></div> : null}
+            <ul className="library-grid">
+              {shown.map((book) => (
+                <li key={book.directory}>
+                  <a href={bookHref("/library/read", book.directory)}>
+                    <span className="library-cover"><LibraryIcon /></span>
+                    <strong>{book.title || "未命名作品"}</strong>
+                    <span>作者 · {book.author}</span>
+                    <p>{book.synopsis || "作者还没有写简介。"}</p>
+                    <small>{book.completed_count} 章可读 · {book.comment_count} 条评论</small>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <aside className="hall-scroll"><p>共读故事</p><p>留下回声</p></aside>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function LibraryReader({ directory, onLeave }) {
+  const [book, setBook] = useState(null)
+  const [current, setCurrent] = useState(null)
+  const [body, setBody] = useState("")
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let stop = false
+    getPublicBook(directory).then((data) => {
+      if (stop) return
+      const safe = { ...data, chapters: Array.isArray(data.chapters) ? data.chapters : [], comments: Array.isArray(data.comments) ? data.comments : [] }
+      setBook(safe)
+      setCurrent(safe.chapters[0]?.chapter ?? null)
+    }).catch((reason) => { if (!stop) setError(reason.message) })
+    return () => { stop = true }
+  }, [directory])
+  if (!book) return <div className="hall"><HallTop here="图书馆" onLeave={onLeave} /><Loading message={error || "正在取书。"} error={Boolean(error)} /></div>
+  const selected = book.chapters.find((chapter) => chapter.chapter === current)
+  async function submit(event) {
+    event.preventDefault()
+    if (!body.trim()) return
+    setBusy(true); setError("")
+    try { setBook(await addComment(directory, body)); setBody("") } catch (reason) { setError(reason.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="hall public-reader">
+      <HallTop here="图书馆 · 阅读" onLeave={onLeave} />
+      <main className="public-reading">
+        <p className="eyebrow"><a href="#/library">返回图书馆</a></p>
+        <header><h1>{book.title || "未命名作品"}</h1><p>作者 · {book.author}</p><p>{book.synopsis}</p><span className="readonly-mark">只读作品</span></header>
+        <div className="desk-grid">
+          <article className="sheet reading">
+            {selected ? <><h2 className="chapter-name">{selected.title || `第 ${selected.chapter} 章`}</h2><div className="chapter-read">{selected.body}</div></> : <p className="missing">还没有可读章节</p>}
+          </article>
+          <nav className="chapter-index" aria-label="目录"><h2>目录</h2><ol>{book.chapters.map((chapter) => <li key={chapter.chapter}><button type="button" aria-current={chapter.chapter === current ? "true" : undefined} onClick={() => setCurrent(chapter.chapter)}>第 {chapter.chapter} 章{chapter.title ? <small>{chapter.title}</small> : null}</button></li>)}</ol></nav>
+        </div>
+        <section className="comments"><h2>读者评论</h2><form onSubmit={submit}><textarea value={body} maxLength={1000} rows={3} placeholder="说说你的阅读感受……" onChange={(event) => setBody(event.target.value)} /><button className="signal" type="submit" disabled={busy || !body.trim()}>{busy ? "正在提交" : "发表评论"}</button></form>{error ? <p className="banner">{error}</p> : null}<ol>{book.comments.map((comment) => <li key={comment.id}><strong>{comment.author}</strong><time>{comment.created_at ? new Date(comment.created_at).toLocaleString() : ""}</time><p>{comment.body}</p></li>)}</ol>{book.comments.length === 0 ? <p className="quiet-text">还没有评论，来留下第一条吧。</p> : null}</section>
+      </main>
+    </div>
+  )
+}
+
 export function Reader({ directory }) {
   const { snapshot, loadError } = useSnapshot(directory)
   const [current, setCurrent] = useState(null)
   useEffect(() => {
-    if (current == null && snapshot?.completed_chapters?.length) {
+    if (current == null && Array.isArray(snapshot?.completed_chapters) && snapshot.completed_chapters.length) {
       setCurrent(snapshot.completed_chapters[0])
     }
   }, [snapshot, current])
   if (!directory) return <MissingBook />
   if (!snapshot) return <Loading message={loadError || "正在读取章节。"} error={Boolean(loadError)} />
-  const chapters = new Map(snapshot.chapters.map((chapter) => [chapter.chapter, chapter]))
+  const chapterRows = Array.isArray(snapshot.chapters) ? snapshot.chapters : []
+  const completedRows = Array.isArray(snapshot.completed_chapters) ? snapshot.completed_chapters : []
+  const chapters = new Map(chapterRows.map((chapter) => [chapter.chapter, chapter]))
   const selected = current == null ? null : chapters.get(current)
   const done = new Set(snapshot.completed_chapters)
-  const outline = snapshot.guide?.outline || []
+  const outline = Array.isArray(snapshot.guide?.outline) ? snapshot.guide.outline : []
   const catalog = outline.length
     ? outline.map((item) => ({
       n: Number(item.chapter),
       title: chapters.get(Number(item.chapter))?.title || item.title || "",
       ready: done.has(Number(item.chapter)),
     }))
-    : snapshot.completed_chapters.map((n) => ({ n, title: chapters.get(n)?.title || "", ready: true }))
+    : completedRows.map((n) => ({ n, title: chapters.get(n)?.title || "", ready: true }))
   return (
     <main className="page reader">
       <BookBoard
@@ -1814,7 +1920,7 @@ export function Reader({ directory }) {
         focus={current || 0}
         onPick={setCurrent}
       />
-      {snapshot.completed_chapters.length === 0 ? <p className="quiet-text board-follow">还没有完成的章节。</p> : (
+      {completedRows.length === 0 ? <p className="quiet-text board-follow">还没有完成的章节。</p> : (
         <div className="desk-grid">
           <article className="sheet reading">
             {selected ? (

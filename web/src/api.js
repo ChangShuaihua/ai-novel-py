@@ -5,9 +5,30 @@ let currentName = ""
 let refreshing = null
 
 const API_BASE = String(import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765").replace(/\/$/, "")
+const REQUEST_TIMEOUT = 15000
 
 function api(path) {
   return `${API_BASE}${path}`
+}
+
+async function timedFetch(url, options = {}) {
+  const controller = new AbortController()
+  const external = options.signal
+  const abort = () => controller.abort(external?.reason)
+  if (external) {
+    if (external.aborted) abort()
+    else external.addEventListener("abort", abort, { once: true })
+  }
+  const timer = window.setTimeout(() => controller.abort(new Error("请求超时")), REQUEST_TIMEOUT)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted && !external?.aborted) throw new Error("控制室响应超时，请稍后重试")
+    throw error
+  } finally {
+    window.clearTimeout(timer)
+    external?.removeEventListener("abort", abort)
+  }
 }
 
 export function currentUsername() {
@@ -34,7 +55,7 @@ async function readJson(response) {
 
 export function refreshAccess() {
   if (!refreshing) {
-    refreshing = fetch(api("/api/refresh"), {
+    refreshing = timedFetch(api("/api/refresh"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -60,7 +81,12 @@ async function request(url, options = {}, allowRefresh = true) {
   const { quietAuth, ...rest } = options
   const headers = { ...(rest.headers || {}) }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
-  let response = await fetch(api(url), { ...rest, credentials: "include", headers })
+  let response
+  try {
+    response = await timedFetch(api(url), { ...rest, credentials: "include", headers })
+  } catch (error) {
+    throw new Error(error?.message || "控制室没有应答")
+  }
   if (response.status === 401 && allowRefresh && !quietAuth) {
     const renewed = await refreshAccess()
     if (renewed) return request(url, options, false)
@@ -128,6 +154,31 @@ export async function changePassword(payload) {
 
 export function getLibrary() {
   return request("/api/library")
+}
+
+export function getPublicLibrary() {
+  return request("/api/public-library")
+}
+
+export function getPublicBook(directory) {
+  const query = new URLSearchParams({ directory })
+  return request(`/api/public-book?${query}`)
+}
+
+export function publishBook(directory, visible = true) {
+  return request("/api/public-library", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ directory, action: visible ? "publish" : "unpublish" }),
+  })
+}
+
+export function addComment(directory, body) {
+  return request("/api/comments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ directory, body }),
+  })
 }
 
 export function pickDirectory() {

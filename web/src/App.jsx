@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react"
+import { Component, useEffect, useState } from "react"
 
 import { logout, restoreSession } from "./api.js"
 import { Login, PasswordScreen } from "./gate.jsx"
-import { DeskScreen, ImportScreen, ListingScreen, ModelScreen, NewBook, Reader, Shelf } from "./screens.jsx"
+import { DeskScreen, ImportScreen, Library, LibraryReader, ListingScreen, ModelScreen, NewBook, Reader, Shelf } from "./screens.jsx"
 
 const SCREEN = {
   "/": "书架",
@@ -23,9 +23,43 @@ export function App() {
   return <Studio onLeave={session.leave} />
 }
 
+export class AppBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidCatch(error, info) {
+    console.error("页面渲染失败", error, info)
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <main className="crash-page" role="alert">
+        <div className="crash-card">
+          <span className="seal" aria-hidden="true">文</span>
+          <h1>页面没有正常打开</h1>
+          <p>页面数据可能暂时不完整。重新加载通常可以恢复；如果仍然出现，请保留控制台错误。</p>
+          <div className="page-actions">
+            <button className="signal" type="button" onClick={() => window.location.reload()}>重新加载</button>
+            <a className="quiet-link" href="#/" onClick={() => this.setState({ error: null })}>回到书架</a>
+          </div>
+        </div>
+      </main>
+    )
+  }
+}
+
 function Studio({ onLeave }) {
   const route = useRoute()
   if (route.path === "/") return <Shelf onLeave={onLeave} />
+  if (route.path === "/library") return <Library onLeave={onLeave} />
+  if (route.path === "/library/read") return <LibraryReader directory={route.directory} onLeave={onLeave} />
   if (route.path === "/new") return <NewBook directory={route.directory} onLeave={onLeave} />
   if (route.path === "/desk") return <DeskScreen directory={route.directory} onLeave={onLeave} />
   if (route.path === "/model") return <ModelScreen onLeave={onLeave} />
@@ -110,7 +144,7 @@ function readRoute() {
   const raw = window.location.hash.replace(/^#/, "") || "/"
   const [path, query = ""] = raw.split("?")
   const params = new URLSearchParams(query)
-  const known = ["/", "/model", "/new", "/desk", "/read", "/import", "/listing", "/pass"]
+  const known = ["/", "/library", "/library/read", "/model", "/new", "/desk", "/read", "/import", "/listing", "/pass"]
   return {
     path: known.includes(path) ? path : "/",
     directory: params.get("directory") || "",

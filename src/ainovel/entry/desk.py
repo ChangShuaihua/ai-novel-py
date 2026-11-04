@@ -156,6 +156,27 @@ class Desk:
             "trash": [self._shelf(Path(item)) for item in trash],
         }
 
+    def public_library(self) -> dict:
+        if self._bookdb is None or not hasattr(self._bookdb, "public_books"):
+            return {"books": []}
+        return {"books": self._catalog_call(self._bookdb.public_books)}
+
+    def publish(self, directory: str, visible: bool = True) -> dict:
+        if self._bookdb is None or not str(directory).startswith("db:"):
+            raise DeskError("只有保存在服务器上的书可以公开到图书馆")
+        self._catalog_call(lambda: self._bookdb.publish(directory, visible))
+        return self.library()
+
+    def public_book(self, directory: str) -> dict:
+        if self._bookdb is None:
+            raise DeskError("图书馆暂不可用")
+        return self._catalog_call(lambda: self._bookdb.public_book(directory))
+
+    def comment(self, directory: str, body: str) -> dict:
+        if self._bookdb is None:
+            raise DeskError("图书馆暂不可用")
+        return self._catalog_call(lambda: self._bookdb.comment(directory, body))
+
     def model_settings(self) -> dict:
         target = self._config_file()
         try:

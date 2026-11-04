@@ -65,6 +65,8 @@ CREATE TABLE books (
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
   trashed_at DATETIME(6) NULL,
+  is_public TINYINT(1) NOT NULL DEFAULT 0,
+  published_at DATETIME(6) NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_books_user_path (user_id, root_path_hash),
   KEY idx_books_shelf (user_id, shelf_state),
@@ -213,3 +215,15 @@ CREATE TABLE IF NOT EXISTS book_files (
   CONSTRAINT fk_book_files_book
     FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE
 ) ENGINE=InnoDB COMMENT='书里的文件。网页新建的书整本存在这里';
+
+CREATE TABLE IF NOT EXISTS book_comments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  book_id BIGINT UNSIGNED NOT NULL,
+  user_id CHAR(16) NOT NULL,
+  body VARCHAR(1000) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_book_comments_book (book_id, created_at),
+  CONSTRAINT fk_book_comments_book FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE,
+  CONSTRAINT fk_book_comments_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB COMMENT='公开图书馆的读者评论';

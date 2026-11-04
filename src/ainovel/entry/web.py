@@ -108,6 +108,19 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
                     except DeskError as exc:
                         self._send(503, {"error": str(exc)})
                     return
+                if parsed.path == "/api/public-library":
+                    try:
+                        self._send(200, desk.public_library())
+                    except DeskError as exc:
+                        self._send(503, {"error": str(exc)})
+                    return
+                if parsed.path == "/api/public-book":
+                    directory = (parse_qs(parsed.query).get("directory") or [""])[0]
+                    try:
+                        self._send(200, desk.public_book(directory))
+                    except DeskError as exc:
+                        self._send(404, {"error": str(exc)})
+                    return
                 if parsed.path == "/api/model":
                     self._send(200, self._owned(desk.model_settings()))
                     return
@@ -167,6 +180,15 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
                         self._send(200, desk.attach(directory))
                     else:
                         raise DeskError(f"未知书架动作 {action}")
+                    return
+                if parsed.path == "/api/public-library":
+                    action = str(payload.get("action") or "publish")
+                    if action not in {"publish", "unpublish"}:
+                        raise DeskError("未知图书馆动作")
+                    self._send(200, desk.publish(str(payload.get("directory") or ""), action == "publish"))
+                    return
+                if parsed.path == "/api/comments":
+                    self._send(200, desk.comment(str(payload.get("directory") or ""), str(payload.get("body") or "")))
                     return
                 if parsed.path == "/api/directory":
                     self._send(200, desk.pick_directory())
