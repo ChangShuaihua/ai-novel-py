@@ -18,8 +18,8 @@
   --hold: #7a5224;
   --hold-bg: #f3eadc;
   --banner: #f6efe4;
-  --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --serif: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --sans: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --serif: "Songti SC", "SimSun", serif;
   --lintel: 58px;
   color: var(--ink);
   background: var(--wall);
@@ -65,7 +65,7 @@ a { color: var(--ink); }
 .desk-room {
   background:
     linear-gradient(180deg, rgba(28, 22, 18, 0.4), transparent 76px),
-    url("/bg.png") center / cover no-repeat fixed;
+    url("/bg.webp") center / cover no-repeat fixed;
 }
 
 .desk-room .page-head,
@@ -88,7 +88,7 @@ a { color: var(--ink); }
 .painted {
   background:
     linear-gradient(180deg, rgba(28, 22, 18, 0.4), transparent 76px),
-    url("/bg.png") center / cover no-repeat fixed;
+    url("/bg.webp") center / cover no-repeat fixed;
 }
 
 .painted .page-head,
@@ -360,7 +360,7 @@ button.text-link:hover { text-decoration: underline; }
   color: #2a241c;
   background:
     linear-gradient(90deg, rgba(255, 248, 238, 0.28), rgba(255, 248, 238, 0.04) 46%, rgba(42, 36, 28, 0.08)),
-    url("/bg.png") center / cover no-repeat;
+    url("/bg.webp") center / cover no-repeat;
 }
 
 .door-bar {
@@ -1937,7 +1937,7 @@ button.signal:disabled {
   color: #241c16;
   background:
     linear-gradient(180deg, rgba(28, 22, 18, 0.28), transparent 92px),
-    url("/bg.png") center / cover no-repeat;
+    url("/bg.webp") center / cover no-repeat;
 }
 
 .hall-bar {
@@ -2446,7 +2446,7 @@ button.signal:disabled {
   color: #2a211c;
   background:
     linear-gradient(180deg, rgba(28, 22, 18, 0.42), transparent 76px),
-    url("/bg.png") center / cover no-repeat fixed;
+    url("/bg.webp") center / cover no-repeat fixed;
 }
 
 .studio-bar {
