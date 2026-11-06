@@ -335,7 +335,7 @@ signal_saved      写检查点 commit、章摘要、meta/last_commit.json
 
 `CheckpointGuard` 以本轮开始时的最大检查点序号为界。结束前，要求的步骤里至少有一个序号比基线新，才允许停。中间出现更新的检查点会把连续拦截清零。因此「模型说我写完了」不算完成，完成的证据是检查点写入。
 
-规划师要求的步骤名包括 `book`、`premise`、`outline`、`layered_outline`、`characters`、`world_rules`、`foundation_audit`、`expand_next_arc`、`append_volume`、`update_compass`、`complete_book`、`resolve_outline_feedback`。写作者只要求 `commit`。审阅者按任务文本选择 `review`、`arc_summary` 或 `volume_summary`。
+规划师要求的步骤名包括 `book`、`premise`、`outline`、`layered_outline`、`characters`、`world_rules`、`foundation_audit`、`expand_next_arc`、`append_volume`、`update_compass`、`complete_book`、`resolve_outline_feedback`。写作者只要求 `commit`。路由派发带职责码，审阅者按职责码选择 `review`、`arc_summary` 或 `volume_summary`。裁定写成的自由任务没有职责码，才从任务文本识别。
 
 ### 提示词怎么装
 

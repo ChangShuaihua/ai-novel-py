@@ -7,7 +7,7 @@ import pytest
 
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
-from ainovel.flow.model import AggregateKind, AggregateRefresh, ArcBoundary, RouteState
+from ainovel.flow.model import AggregateKind, AggregateRefresh, ArcBoundary, Duty, RouteState
 from ainovel.flow.route import route
 
 NIL = "nil"
@@ -165,36 +165,30 @@ def _expected(state: RouteState) -> str:
     return NEXT
 
 
+_DUTY_LABEL = {
+    Duty.FILL_FOUNDATION: FILL,
+    Duty.AUDIT_FOUNDATION: FILL,
+    Duty.REWRITE: REWRITE,
+    Duty.POLISH: REWRITE,
+    Duty.OUTLINE_FEEDBACK: FEEDBACK,
+    Duty.ARC_REVIEW: ARC_REVIEW,
+    Duty.ARC_SUMMARY: ARC_SUMMARY,
+    Duty.VOLUME_SUMMARY: VOLUME_SUMMARY,
+    Duty.EXPAND_ARC: EXPAND,
+    Duty.NEW_VOLUME: NEW_VOLUME,
+    Duty.GLOBAL_REVIEW: GLOBAL,
+    Duty.OUTLINE_EXHAUSTED: EXHAUSTED,
+    Duty.WRITE_CHAPTER: NEXT,
+}
+
+
 def _classify(instruction) -> str:
     if instruction is None:
         return NIL
-    task = instruction.task
-    if instruction.agent == "writer":
-        if "重写" in task or "打磨" in task:
-            return REWRITE
-        if "写第" in task:
-            return NEXT
-    if instruction.agent == "editor":
-        if "弧级评审" in task:
-            return ARC_REVIEW
-        if "全局审阅" in task:
-            return GLOBAL
-        if "save_arc_summary" in task:
-            return ARC_SUMMARY
-        if "save_volume_summary" in task:
-            return VOLUME_SUMMARY
-    if instruction.agent in ("architect_long", "architect_short"):
-        if "补齐基础设定" in task:
-            return FILL
-        if "writer_feedback" in task:
-            return FEEDBACK
-        if "expand_next_arc" in task:
-            return EXPAND
-        if "append_volume" in task:
-            return NEW_VOLUME
-        if "非分层大纲已写完" in task:
-            return EXHAUSTED
-    raise AssertionError(f"无法归类: {instruction}")
+    label = _DUTY_LABEL.get(instruction.duty)
+    if label is None:
+        raise AssertionError(f"无法归类: {instruction}")
+    return label
 
 
 def _boundaries():

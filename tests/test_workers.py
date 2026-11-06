@@ -5,7 +5,8 @@ import pytest
 
 from ainovel.agents import AgentLoopError, CheckpointGuardError, build_workers
 from ainovel.agents.catalog import ARCHITECT_TOOLS, EDITOR_TOOLS, WRITER_TOOLS
-from ainovel.agents.workers import editor_steps
+from ainovel.agents.workers import editor_message, editor_steps
+from ainovel.flow.model import Duty
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
 from ainovel.llm.types import Completion, ToolCall
@@ -52,6 +53,8 @@ def test_tool_sets_match_the_three_roles(tmp_path: Path):
     assert editor_steps("审阅这一章") == ("review",)
     assert editor_steps("请 save_arc_summary") == ("arc_summary",)
     assert editor_steps("写卷摘要") == ("volume_summary",)
+    assert editor_steps("写卷摘要", Duty.ARC_REVIEW) == ("review",)
+    assert "save_review" in editor_message("写卷摘要", Duty.ARC_REVIEW)
 
 
 def test_foreign_tool_cannot_enter_the_agent(tmp_path: Path):

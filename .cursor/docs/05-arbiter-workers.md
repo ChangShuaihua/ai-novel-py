@@ -89,7 +89,7 @@ reason     非空
 
 工具：`novel_context`、`read_chapter`、`save_review`、`save_arc_summary`、`save_volume_summary`。
 
-被派写摘要时，只调用 `save_review` 不算完成。被派审阅时，只写摘要不算完成。护栏按本轮任务要求的步骤名检查。
+被派写摘要时，只调用 `save_review` 不算完成。被派审阅时，只写摘要不算完成。路由派发的护栏按职责码检查；裁定写成的自由任务没有职责码，才按任务文本识别步骤名。
 
 ## 提示词资产
 

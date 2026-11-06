@@ -7,12 +7,31 @@ from ainovel.domain.progress import Progress
 REVIEW_INTERVAL = 5
 
 
+class Duty:
+    """路由交给代理的职责。自由派单没有职责码，任务正文由裁定写成。"""
+
+    FILL_FOUNDATION = "fill_foundation"
+    AUDIT_FOUNDATION = "audit_foundation"
+    REWRITE = "rewrite"
+    POLISH = "polish"
+    OUTLINE_FEEDBACK = "outline_feedback"
+    ARC_REVIEW = "arc_review"
+    ARC_SUMMARY = "arc_summary"
+    VOLUME_SUMMARY = "volume_summary"
+    EXPAND_ARC = "expand_arc"
+    NEW_VOLUME = "new_volume"
+    GLOBAL_REVIEW = "global_review"
+    OUTLINE_EXHAUSTED = "outline_exhausted"
+    WRITE_CHAPTER = "write_chapter"
+
+
 @dataclass(frozen=True)
 class Instruction:
     agent: str
     task: str
     reason: str
     chapter: int = 0
+    duty: str = ""
 
 
 class AggregateKind:

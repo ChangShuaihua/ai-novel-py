@@ -189,7 +189,7 @@ def test_latest_instruction_is_the_one_that_started(tmp_path: Path):
     book = Book.open(tmp_path, writable=True)
 
     class Stop:
-        def run(self, completer, store, task):
+        def run(self, completer, store, task, **_extra):
             store.progress.save(Progress(phase=Phase.COMPLETE))
 
     engine = Engine(book, {"writer": Stop()}, None, {})

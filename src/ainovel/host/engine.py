@@ -7,7 +7,7 @@ from ainovel.arbiter.decide import ArbiterError, decide_failure, decide_plan_sta
 from ainovel.domain.run_meta import PlanStartRecord
 from ainovel.domain.transitions import Phase
 from ainovel.flow.load import foundation_missing, load_state
-from ainovel.flow.model import Instruction
+from ainovel.flow.model import Duty, Instruction
 from ainovel.flow.outline import repair_indexes
 from ainovel.flow.route import route
 from ainovel.host.gate import ChapterAdvanceGate
@@ -90,7 +90,12 @@ class Engine:
                 break
             self.latest_instruction = instruction
             try:
-                self.workers[instruction.agent].run(self.completer, self.book, instruction.task)
+                self.workers[instruction.agent].run(
+                    self.completer,
+                    self.book,
+                    instruction.task,
+                    duty=instruction.duty,
+                )
             except KeyError:
                 self._pause(f"未知代理 {instruction.agent}，已暂停")
                 break
@@ -140,6 +145,7 @@ class Engine:
                 agent="architect_long",
                 task="下一弧仍是骨架。调用 expand_next_arc 展开下一弧。",
                 reason="写作目标章未展开，先展开再续写",
+                duty=Duty.EXPAND_ARC,
             )
         return instruction
 

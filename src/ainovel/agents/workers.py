@@ -19,6 +19,7 @@ from ainovel.agents.catalog import (
 from ainovel.agents.loop import AgentResult, run_agent
 from ainovel.llm.types import ToolSpec
 from ainovel.contextpack import ContextUsage, WriterContext
+from ainovel.flow.model import Duty
 from ainovel.store.book import Book
 from ainovel.tools import call_tool
 from ainovel.voice import Bundle, build_writer_prompt, load_bundle
@@ -39,8 +40,8 @@ class Worker:
     system_prompt: str
     tool_specs: tuple[ToolSpec, ...]
     stop_after: tuple[str, ...]
-    steps_for: Callable[[str], tuple[str, ...]]
-    message_for: Callable[[str], str]
+    steps_for: Callable[..., tuple[str, ...]]
+    message_for: Callable[..., str]
     prompt_cache_key: str
     max_turns: int
     usage: ContextUsage = field(default_factory=ContextUsage)
@@ -49,7 +50,16 @@ class Worker:
     def tool_names(self) -> tuple[str, ...]:
         return tuple(spec.name for spec in self.tool_specs)
 
-    def run(self, completer, book: Book, task: str, *, max_turns: int | None = None, context_budget: int | None = None) -> AgentResult:
+    def run(
+        self,
+        completer,
+        book: Book,
+        task: str,
+        *,
+        duty: str = "",
+        max_turns: int | None = None,
+        context_budget: int | None = None,
+    ) -> AgentResult:
         if self.name == "writer":
             completer = WriterContext(
                 completer,
@@ -65,8 +75,8 @@ class Worker:
             call_tool=lambda name, args: call_tool(book, name, args),
             checkpoints=book.checkpoints,
             stop_after=self.stop_after,
-            required_steps=self.steps_for(task),
-            block_message=self.message_for(task),
+            required_steps=self.steps_for(task, duty),
+            block_message=self.message_for(task, duty),
             max_turns=self.max_turns if max_turns is None else max_turns,
             isolate_stop=self.name == "writer",
         )
@@ -95,8 +105,8 @@ def build_workers(
             system_prompt=loaded.prompts[prompt_file],
             tool_specs=specs_for(ARCHITECT_TOOLS),
             stop_after=ARCHITECT_STOP,
-            steps_for=lambda _task: ARCHITECT_STEPS,
-            message_for=lambda _task: _ARCHITECT_BLOCK,
+            steps_for=_fixed(ARCHITECT_STEPS),
+            message_for=_fixed(_ARCHITECT_BLOCK),
             prompt_cache_key=cache_key(name),
             max_turns=max_turns,
         )
@@ -109,8 +119,8 @@ def build_workers(
             system_prompt=writer_prompt,
             tool_specs=specs_for(WRITER_TOOLS),
             stop_after=WRITER_STOP,
-            steps_for=lambda _task: WRITER_STEPS,
-            message_for=lambda _task: _WRITER_BLOCK,
+            steps_for=_fixed(WRITER_STEPS),
+            message_for=_fixed(_WRITER_BLOCK),
             prompt_cache_key=cache_key("writer"),
             max_turns=30,
         ),
@@ -127,7 +137,32 @@ def build_workers(
     }
 
 
-def editor_steps(task: str) -> tuple[str, ...]:
+_EDITOR_STEPS = {
+    Duty.VOLUME_SUMMARY: ("volume_summary",),
+    Duty.ARC_SUMMARY: ("arc_summary",),
+    Duty.ARC_REVIEW: ("review",),
+    Duty.GLOBAL_REVIEW: ("review",),
+}
+
+_EDITOR_MESSAGES = {
+    Duty.VOLUME_SUMMARY: "本次任务是生成卷摘要：你必须调用 save_volume_summary 落盘后才能结束，save_review 复核不算完成。",
+    Duty.ARC_SUMMARY: "本次任务是生成弧摘要：你必须调用 save_arc_summary 落盘后才能结束，save_review 复核不算完成。",
+    Duty.ARC_REVIEW: "你必须调用 save_review 落盘审阅后才能结束。只写摘要不算完成。",
+    Duty.GLOBAL_REVIEW: "你必须调用 save_review 落盘审阅后才能结束。只写摘要不算完成。",
+}
+
+
+def _fixed(value):
+    def pick(_task: str, _duty: str = "") -> object:
+        return value
+
+    return pick
+
+
+def editor_steps(task: str, duty: str = "") -> tuple[str, ...]:
+    picked = _EDITOR_STEPS.get(duty)
+    if picked is not None:
+        return picked
     if "save_volume_summary" in task or "卷摘要" in task:
         return ("volume_summary",)
     if "save_arc_summary" in task or "弧摘要" in task:
@@ -135,9 +170,12 @@ def editor_steps(task: str) -> tuple[str, ...]:
     return ("review",)
 
 
-def editor_message(task: str) -> str:
+def editor_message(task: str, duty: str = "") -> str:
+    picked = _EDITOR_MESSAGES.get(duty)
+    if picked is not None:
+        return picked
     if "save_volume_summary" in task or "卷摘要" in task:
-        return "本次任务是生成卷摘要：你必须调用 save_volume_summary 落盘后才能结束，save_review 复核不算完成。"
+        return _EDITOR_MESSAGES[Duty.VOLUME_SUMMARY]
     if "save_arc_summary" in task or "弧摘要" in task:
-        return "本次任务是生成弧摘要：你必须调用 save_arc_summary 落盘后才能结束，save_review 复核不算完成。"
-    return "你必须调用 save_review 落盘审阅后才能结束。只写摘要不算完成。"
+        return _EDITOR_MESSAGES[Duty.ARC_SUMMARY]
+    return _EDITOR_MESSAGES[Duty.ARC_REVIEW]

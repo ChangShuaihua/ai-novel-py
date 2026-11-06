@@ -187,7 +187,7 @@ class _CountingWorker:
     def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, completer, book, task, max_turns=None):
+    def run(self, completer, book, task, max_turns=None, **_extra):
         self.calls += 1
         return AgentResult(messages=[])
 
@@ -262,7 +262,7 @@ def test_engine_records_writer_context_usage(tmp_path: Path):
         def __init__(self) -> None:
             self.usage = type("Usage", (), {"text": "42% · 正常"})()
 
-        def run(self, completer, book, task):
+        def run(self, completer, book, task, **_extra):
             return None
 
     engine = Engine(book, {"writer": Writer()}, object(), {})

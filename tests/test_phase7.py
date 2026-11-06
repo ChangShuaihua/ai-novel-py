@@ -25,7 +25,7 @@ class _Worker:
     def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, completer, book, task, max_turns=None, context_budget=None):
+    def run(self, completer, book, task, max_turns=None, context_budget=None, **_extra):
         self.calls += 1
         return None
 
