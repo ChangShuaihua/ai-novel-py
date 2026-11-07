@@ -83,6 +83,7 @@ class RouteState:
     has_volume_summary: bool = False
     foundation_missing: list[str] = field(default_factory=list)
     planning_tier: str = ""
+    planning_approval: str = ""
     has_global_review: bool = False
     immediate_feedback_count: int = 0
     aggregate_refresh: AggregateRefresh | None = None

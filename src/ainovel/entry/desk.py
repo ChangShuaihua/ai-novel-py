@@ -10,6 +10,7 @@ from pathlib import Path
 from ainovel.entry.catalog import CatalogError
 from ainovel.entry.spine_cache import load_spines, store_spines
 from ainovel.domain.book import BookMetadata
+from ainovel.domain.transitions import Phase
 from ainovel.entry.guide import GuideError, confirm as guide_confirm, load_guide, revise as guide_revise
 from ainovel.entry.live import LiveFeed
 from ainovel.exporting import export_txt
@@ -413,6 +414,8 @@ class Desk:
             return self._export(root, str(payload.get("dest") or ""))
         if action == "save_plan":
             return self._save_plan(root, payload)
+        if action == "confirm_plan":
+            return self._confirm_plan(root, payload)
         if action == "listing":
             return self._listing(root)
         if action == "abort":
@@ -456,6 +459,43 @@ class Desk:
                 logger.exception("写回数据库失败")
         self._note_book(root)
         return self._snapshot(root)
+
+    def _confirm_plan(self, root: Path, payload: dict) -> dict:
+        with self._guard:
+            if self._running:
+                snap = self._snapshot_unlocked(root)
+                snap["error"] = "The engine is still running"
+                return snap
+        if self._is_locked(root):
+            snap = self._snapshot(root)
+            snap["error"] = "The book is in use by another process"
+            return snap
+        book = Book.open(root, writable=True)
+        meta = book.run_meta.load()
+        progress = book.progress.load()
+        if meta is None or not meta.planning_approval or progress is None:
+            snap = self._snapshot(root)
+            snap["error"] = "No planning stage is waiting for approval"
+            return snap
+        approved = meta.planning_approval
+        expected = "book" if progress.phase == Phase.INIT else "premise" if progress.phase == Phase.PREMISE else "outline"
+        if approved != expected:
+            snap = self._snapshot(root)
+            snap["error"] = "The planning stage changed; refresh and try again"
+            return snap
+        if approved == "premise" and "premise" in payload:
+            update_reader_plan(book, {"premise": payload["premise"]})
+        elif approved == "outline" and "outline" in payload:
+            update_reader_plan(book, {"outline": payload["outline"]})
+        meta = book.run_meta.load()
+        meta.planning_approval = ""
+        book.run_meta.save(meta)
+        if self._bookdb is not None:
+            try:
+                self._bookdb.sync_tree(root)
+            except CatalogError:
+                logger.exception("failed to persist planning approval")
+        return self._submit(root, "resume", {})
 
     def shutdown(self) -> None:
         with self._guard:

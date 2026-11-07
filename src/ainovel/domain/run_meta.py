@@ -91,6 +91,7 @@ class RunMeta(BaseModel):
     style: str = ""
     model: str = ""
     planning_tier: str = ""
+    planning_approval: str = ""
     start_prompt: str = ""
     plan_start: PlanStartRecord | None = None
     pending_steer: str = ""
@@ -116,6 +117,8 @@ class RunMeta(BaseModel):
             payload["provider"] = self.provider
         if self.planning_tier:
             payload["planning_tier"] = self.planning_tier
+        if self.planning_approval:
+            payload["planning_approval"] = self.planning_approval
         if self.start_prompt:
             payload["start_prompt"] = self.start_prompt
         if self.plan_start is not None:

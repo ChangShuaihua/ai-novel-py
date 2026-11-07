@@ -110,6 +110,8 @@ class Host:
         self.book.checkpoints.reset()
         meta = self.book.run_meta.init(style=self.style, provider="", model="")
         meta.start_prompt = requirement
+        meta.advance_mode = "review"
+        meta.planning_approval = ""
         self.book.run_meta.save(meta)
         try:
             decision = decide_plan_start(

@@ -131,13 +131,14 @@ class RunMetaStore:
             if existing is not None:
                 meta.pending_steer = existing.pending_steer
                 meta.planning_tier = existing.planning_tier
+                meta.planning_approval = existing.planning_approval
                 meta.plan_start = existing.plan_start
                 meta.start_prompt = existing.start_prompt
                 meta.advance_mode = existing.advance_mode
                 meta.advance_permit_chapter = existing.advance_permit_chapter
                 meta.advance_hold = existing.advance_hold
             if not meta.advance_mode:
-                meta.advance_mode = ChapterAdvanceMode.AUTO
+                meta.advance_mode = ChapterAdvanceMode.REVIEW
             validate_advance_control(meta)
             self._io.write_json_unlocked("meta/run.json", meta.to_disk())
             return meta

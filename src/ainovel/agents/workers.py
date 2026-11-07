@@ -217,6 +217,12 @@ _ARCHITECT_DUTY_MESSAGES = {
 def architect_steps(task: str, duty: str = "") -> tuple[str, ...]:
     """只承认本职责的检查点。save_book 不能让展开弧或审设定提前结束。"""
     if duty == Duty.FILL_FOUNDATION:
+        if "仅生成书籍信息" in task:
+            return ("book",)
+        if "仅生成故事前提" in task:
+            return ("premise",)
+        if "仅生成大纲" in task:
+            return ("outline", "layered_outline")
         return _FOUNDATION_STEPS
     picked = _ARCHITECT_DUTY_STEPS.get(duty)
     if picked is not None:

@@ -9,6 +9,22 @@ def fill_foundation(missing: list[str]) -> str:
     )
 
 
+def fill_foundation_step(step: str, scale: str) -> str:
+    names = {
+        "book": "书籍信息",
+        "premise": "故事前提",
+        "outline": "大纲",
+        "layered_outline": "大纲",
+    }
+    if step not in names:
+        raise ValueError(f"unsupported foundation step: {step}")
+    return (
+        f"这是分阶段确认流程。本次仅生成{names[step]}，不得生成或修改其他设定。"
+        f"规划层级为 {scale}。先读取 novel_context 与用户需求，完成后只保存本阶段要求的产物。"
+        "保存成功后立即结束，等待用户确认；不要调用 audit_foundation，也不要开始下一阶段。"
+    )
+
+
 def design_characters() -> str:
     return (
         "只补人物。先调用 novel_context 读取已有设定，再调用 save_characters。"

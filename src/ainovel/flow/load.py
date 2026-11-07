@@ -21,6 +21,7 @@ def load_state(book: Book) -> RouteState:
     meta = book.run_meta.load()
     if meta is not None:
         state.planning_tier = meta.planning_tier
+        state.planning_approval = meta.planning_approval
     try:
         progress = book.progress.load()
     except (json.JSONDecodeError, ValueError, TypeError) as exc:

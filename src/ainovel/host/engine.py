@@ -161,6 +161,9 @@ class Engine:
                             decision=self.last_report,
                             reason=instruction.reason,
                         )
+                    if instruction.duty == Duty.FILL_FOUNDATION and self._needs_planning_approval():
+                        self._pause(self._planning_approval_message())
+                        break
                 self._detached = False
             rounds += 1
         return self.settle()
@@ -229,6 +232,29 @@ class Engine:
 
     def _schedule_enabled(self) -> bool:
         return bool(self.prompts.get("arbiter-schedule.md", "").strip())
+
+    def _needs_planning_approval(self) -> bool:
+        progress = self.book.progress.load()
+        meta = self.book.run_meta.load()
+        return bool(progress is not None and progress.phase != Phase.WRITING and meta is not None and meta.planning_tier)
+
+    def _planning_approval_message(self) -> str:
+        progress = self.book.progress.load()
+        meta = self.book.run_meta.load()
+        if progress is None or meta is None:
+            return "Planning output is saved and waiting for approval"
+        if progress.phase == Phase.INIT:
+            meta.planning_approval = "book"
+            label = "Book title and synopsis"
+        elif progress.phase == Phase.PREMISE:
+            meta.planning_approval = "premise"
+            label = "Story premise"
+        else:
+            meta.planning_approval = "outline"
+            label = "Outline"
+        meta.advance_mode = "review"
+        self.book.run_meta.save(meta)
+        return f"{label} is saved and waiting for your approval"
 
     def _settle_finished_inflight(self) -> None:
         inflight = load_inflight(self.book)
