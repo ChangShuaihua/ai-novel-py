@@ -23,6 +23,7 @@ class Duty:
     GLOBAL_REVIEW = "global_review"
     OUTLINE_EXHAUSTED = "outline_exhausted"
     WRITE_CHAPTER = "write_chapter"
+    DESIGN_CHARACTERS = "design_characters"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,14 @@ class Instruction:
     reason: str
     chapter: int = 0
     duty: str = ""
+
+    def move_id(self) -> str:
+        """菜单项标识。章节类职责带章节号，避免两章返工撞成同一项。"""
+        if self.duty and self.chapter:
+            return f"{self.duty}:{self.chapter}"
+        if self.duty:
+            return self.duty
+        return self.agent
 
 
 class AggregateKind:
@@ -77,6 +86,18 @@ class RouteState:
     has_global_review: bool = False
     immediate_feedback_count: int = 0
     aggregate_refresh: AggregateRefresh | None = None
+
+
+def describe_move(instruction: Instruction) -> dict[str, object]:
+    """交给主代理的菜单项。代理、职责和章节号由引擎固定。"""
+    return {
+        "move_id": instruction.move_id(),
+        "agent": instruction.agent,
+        "duty": instruction.duty,
+        "chapter": instruction.chapter,
+        "task": instruction.task,
+        "reason": instruction.reason,
+    }
 
 
 def should_review(completed_count: int) -> tuple[bool, str]:

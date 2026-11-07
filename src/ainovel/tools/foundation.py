@@ -31,6 +31,18 @@ def save_book(book: Book, args: dict) -> dict:
     return {"title": saved.title, "synopsis": saved.synopsis, "next_step": "save_foundation"}
 
 
+def save_characters(book: Book, args: dict) -> dict:
+    """只写人物。人物代理不能借这个入口改大纲或世界规则。"""
+    raw = args.get("characters")
+    if raw is None:
+        raw = args.get("content")
+    characters = _as_list(raw, "characters")
+    for item in characters:
+        if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+            raise ToolArgsError("每个人物必须是对象，且 name 不能为空")
+    return save_foundation(book, {"type": "characters", "content": characters})
+
+
 def save_foundation(book: Book, args: dict) -> dict:
     kind = str(args.get("type") or "")
     if kind not in _TYPES:
@@ -174,6 +186,144 @@ def revise_outline(book: Book, args: dict) -> dict:
     removed = _consume_immediate_feedback(book)
     remember(book, global_scope(), "outline", "outline.json", digest_text(json.dumps(entries, ensure_ascii=False)))
     return {"revised": True, "consumed_feedback": removed, "next_step": "novel_context"}
+
+
+def update_reader_plan(book: Book, args: dict) -> dict:
+    """读者直接改前提和大纲。已经写过的阶段不会被退回去。"""
+    wrote = []
+    if "premise" in args:
+        content = args.get("premise")
+        if not isinstance(content, str) or not content.strip():
+            raise ToolArgsError("前提不能为空")
+        text = content.strip()
+        if not text.endswith("\n"):
+            text += "\n"
+        write_text(book.root, "premise.md", text)
+        _advance_phase(book, Phase.PREMISE)
+        remember(book, global_scope(), "premise", "premise.md", digest_text(text))
+        wrote.append("premise")
+    if "outline" in args:
+        entries = _reader_entries(args.get("outline"))
+        if _uses_layered_outline(book):
+            _write_layered_entries(book, entries)
+            wrote.append("layered_outline")
+        else:
+            stored = [{"title": item["title"], "summary": item["summary"]} for item in entries]
+            write_json(book.root, "outline.json", stored)
+            _set_total_chapters(book, len(stored), layered=False)
+            _advance_phase(book, Phase.OUTLINE)
+            _consume_immediate_feedback(book)
+            remember(
+                book,
+                global_scope(),
+                "outline",
+                "outline.json",
+                digest_text(json.dumps(stored, ensure_ascii=False)),
+            )
+            wrote.append("outline")
+    if not wrote:
+        raise ToolArgsError("没有要保存的前提或大纲")
+    return {"saved": wrote}
+
+
+def _reader_entries(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        raise ToolArgsError("大纲必须是数组")
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        if not title:
+            continue
+        entries.append({"title": title, "summary": summary})
+    if not entries:
+        raise ToolArgsError("大纲至少要有一章")
+    return entries
+
+
+def _uses_layered_outline(book: Book) -> bool:
+    raw = read_json(book.root, "layered_outline.json")
+    has_layered = isinstance(raw, list) and any(isinstance(volume, dict) and volume.get("arcs") for volume in raw)
+    if not has_layered:
+        return False
+    progress = book.progress.load()
+    if progress is not None and progress.layered:
+        return True
+    flat = read_json(book.root, "outline.json")
+    return not (isinstance(flat, list) and len(flat) > 0)
+
+
+def _write_layered_entries(book: Book, entries: list[dict]) -> None:
+    raw = read_json(book.root, "layered_outline.json")
+    if not isinstance(raw, list) or not raw:
+        raise ToolConflict("没有分层大纲")
+    progress = book.progress.load()
+    completed = progress.latest_completed() if progress is not None else 0
+    if len(entries) < completed:
+        raise ToolArgsError(f"已写完 {completed} 章，大纲不能少于此数")
+    volumes = repair_indexes(raw)
+    slots = [
+        chapter
+        for volume in volumes
+        for arc in (volume.get("arcs") or [])
+        if isinstance(arc, dict)
+        for chapter in (arc.get("chapters") or [])
+        if isinstance(chapter, dict)
+    ]
+    for index, entry in enumerate(entries):
+        if index < len(slots):
+            slots[index]["title"] = entry["title"]
+            slots[index]["summary"] = entry["summary"]
+            continue
+        _append_layered_chapter(volumes, entry)
+    if len(entries) < len(slots):
+        _trim_layered_chapters(volumes, len(entries))
+    volumes = repair_indexes(volumes)
+    write_json(book.root, "layered_outline.json", volumes)
+    _set_total_chapters(book, _expanded_count(volumes), layered=True)
+    _consume_immediate_feedback(book)
+    remember(
+        book,
+        global_scope(),
+        "layered_outline",
+        "layered_outline.json",
+        digest_text(json.dumps(entries, ensure_ascii=False)),
+    )
+
+
+def _append_layered_chapter(volumes: list, entry: dict) -> None:
+    volume = volumes[-1]
+    arcs = volume.get("arcs")
+    if not isinstance(arcs, list) or not arcs:
+        volume["arcs"] = [{"chapters": []}]
+        arcs = volume["arcs"]
+    arc = arcs[-1]
+    if not isinstance(arc, dict):
+        arcs[-1] = {"chapters": []}
+        arc = arcs[-1]
+    chapters = arc.get("chapters")
+    if not isinstance(chapters, list):
+        arc["chapters"] = []
+        chapters = arc["chapters"]
+    chapters.append({"title": entry["title"], "summary": entry["summary"]})
+
+
+def _trim_layered_chapters(volumes: list, keep: int) -> None:
+    seen = 0
+    for volume in volumes:
+        for arc in volume.get("arcs") or []:
+            if not isinstance(arc, dict):
+                continue
+            kept = []
+            for chapter in arc.get("chapters") or []:
+                if not isinstance(chapter, dict):
+                    continue
+                seen += 1
+                if seen <= keep:
+                    kept.append(chapter)
+            arc["chapters"] = kept
 
 
 def resolve_outline_feedback(book: Book, _args: dict) -> dict:

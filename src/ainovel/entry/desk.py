@@ -9,7 +9,9 @@ from pathlib import Path
 
 from ainovel.entry.catalog import CatalogError
 from ainovel.entry.spine_cache import load_spines, store_spines
-from ainovel.entry.guide import GuideError, begin as guide_begin, confirm as guide_confirm, load_guide, revise as guide_revise
+from ainovel.domain.book import BookMetadata
+from ainovel.entry.guide import GuideError, confirm as guide_confirm, load_guide, revise as guide_revise
+from ainovel.entry.live import LiveFeed
 from ainovel.exporting import export_txt
 from ainovel.llm.policy import RoleClient
 from ainovel.llm.types import ModelRef, RoleModel
@@ -20,7 +22,10 @@ from ainovel.llm.litellm_client import LiteLLMTransport
 from ainovel.host.snapshot import build_snapshot, has_progress, shelf_row
 from ainovel.importers.pipeline import ImportError, accept_segmentation, ingest, run
 from ainovel.listing import build_listing
+from ainovel.store.book import Book
 from ainovel.store.io import atomic_replace
+from ainovel.tools.errors import ToolArgsError, ToolConflict
+from ainovel.tools.foundation import update_reader_plan
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,8 @@ class Desk:
         self._exported: dict[str, str] = {}
         self._listings: dict[str, dict] = {}
         self._drop_host_when_idle = False
+        self.live = LiveFeed()
+        self._stream_key = ""
 
     def config_ready(self) -> bool:
         try:
@@ -231,6 +238,7 @@ class Desk:
         if existing:
             prompt += f"\n现有简介，可以重写得更清楚：\n{existing}"
         client = transport or LiteLLMTransport(idle_timeout=120)
+        stream = _stream_kwargs(client, self.live, "synopsis")
         try:
             result = client.complete(
                 ModelRef(
@@ -242,6 +250,7 @@ class Desk:
                 [{"role": "user", "content": prompt}],
                 [],
                 max_tokens=4000,
+                **stream,
             )
         except ProviderError as exc:
             raise DeskError(_probe_error(exc, config.api_key)) from exc
@@ -402,6 +411,8 @@ class Desk:
         root = self._existing_directory(directory)
         if action == "export":
             return self._export(root, str(payload.get("dest") or ""))
+        if action == "save_plan":
+            return self._save_plan(root, payload)
         if action == "listing":
             return self._listing(root)
         if action == "abort":
@@ -419,6 +430,32 @@ class Desk:
         if action in ("resume", "steer", "next", "import", "import_confirm"):
             return self._submit(root, action, payload)
         raise DeskError(f"未知意图 {action}")
+
+    def _save_plan(self, root: Path, payload: dict) -> dict:
+        with self._guard:
+            if self._running and self._active == root:
+                snap = self._snapshot_unlocked(root)
+                snap["error"] = "引擎还在跑。先暂停，再改前提和大纲。"
+                return snap
+            host = self._host if self._active == root else None
+        if host is None and self._is_locked(root):
+            snap = self._snapshot(root)
+            snap["error"] = f"这本书已有进程占用：{root / '.ainovel.lock'}"
+            return snap
+        book = host.book if host is not None else Book.open(root, writable=True)
+        try:
+            update_reader_plan(book, payload)
+        except (ToolArgsError, ToolConflict) as exc:
+            snap = self._snapshot(root)
+            snap["error"] = str(exc)
+            return snap
+        if self._bookdb is not None:
+            try:
+                self._bookdb.sync_tree(root)
+            except CatalogError:
+                logger.exception("写回数据库失败")
+        self._note_book(root)
+        return self._snapshot(root)
 
     def shutdown(self) -> None:
         with self._guard:
@@ -455,13 +492,13 @@ class Desk:
             snap = self._snapshot(root)
             snap["error"] = "这本已经有进度。回到写作现场，用继续。"
             return snap
-        if self._bookdb is not None:
-            return self._guide_call(
-                root,
-                lambda: guide_begin(root, requirement, self._model_text, title=title, synopsis=synopsis),
-            )
-        self._remember(root)
-        return self._submit(root, "start", {"requirement": requirement})
+        if self._bookdb is None:
+            self._remember(root)
+        return self._submit(
+            root,
+            "start",
+            {"requirement": _start_requirement(title, synopsis, requirement), "title": title, "synopsis": synopsis},
+        )
 
     def _submit(self, root: Path, action: str, payload: dict) -> dict:
         if action in _MODEL_ACTIONS and not self.config_ready():
@@ -514,6 +551,7 @@ class Desk:
             host = self._ensure_host(root, require_config=action in _MODEL_ACTIONS)
             self._release_pause(host)
             if action == "start":
+                _write_given_book(host, payload)
                 host.start(payload["requirement"])
             elif action == "resume":
                 host.resume()
@@ -654,6 +692,7 @@ class Desk:
         if previous is not None:
             previous.close()
         completer = self._completer() if require_config or self.config_ready() else _IdleCompleter()
+        self._bind_stream(completer, root)
         host = Host.open(
             root,
             require_config=require_config,
@@ -692,6 +731,8 @@ class Desk:
                 paused=bool(engine.paused) if engine is not None else False,
                 pause_reason=engine.pause_reason if engine is not None else "",
                 events=list(engine.events) if engine is not None else [],
+                latest_agent=latest.agent if latest is not None else "",
+                latest_duty=latest.duty if latest is not None else "",
                 latest_task=latest.task if latest is not None else "",
                 latest_reason=latest.reason if latest is not None else "",
                 queued_steer=self._queued_steer if self._active == root else "",
@@ -718,6 +759,8 @@ class Desk:
                 "total_word_count": 0,
                 "pending_rewrites": [],
                 "latest_instruction": None,
+                "premise": "",
+                "outline": [],
                 "running": False,
                 "paused": False,
                 "pause_reason": "",
@@ -846,6 +889,7 @@ class Desk:
             self._running = True
             self._active = root
             self._error = ""
+            self._stream_key = str(root)
         try:
             work()
         except GuideError as exc:
@@ -872,8 +916,22 @@ class Desk:
         except CatalogError:
             logger.exception("写回书脊失败")
 
+    def _bind_stream(self, completer, root: Path) -> None:
+        if not hasattr(completer, "on_text"):
+            return
+        key = str(root)
+        completer.stream_mode = "article"
+        completer.stream_fields = {"revise_outline": {"content"}}
+        completer.on_begin = lambda: self.live.reset(key)
+        completer.on_text = lambda text: self.live.push(key, text)
+
     def _model_text(self, messages: list[dict]) -> str:
         client = self._completer()
+        key = self._stream_key
+        if key and hasattr(client, "on_text"):
+            client.stream_mode = "prose"
+            client.on_begin = lambda: self.live.reset(key)
+            client.on_text = lambda text: self.live.push(key, text)
         try:
             result = client.complete(messages, [])
         except TypeError:
@@ -1031,6 +1089,16 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPEN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
 
 
+def _stream_kwargs(client, feed: LiveFeed, key: str) -> dict:
+    if not getattr(client, "streams", False):
+        return {}
+    return {
+        "on_text": lambda text: feed.push(key, text),
+        "on_begin": lambda: feed.reset(key),
+        "stream_mode": "prose",
+    }
+
+
 def _synopsis_text(result) -> str:
     """正文优先。思考模型把简介留在 reasoning 里时，取最后一段。"""
     text = _plain_synopsis(getattr(result, "content", "") or "")
@@ -1079,6 +1147,26 @@ def _model_label(status: dict) -> str:
     if not provider or "/" in model:
         return model
     return f"{provider}/{model}"
+
+
+def _start_requirement(title: str, synopsis: str, requirement: str) -> str:
+    parts = []
+    if title:
+        parts.append(f"书名：{title}")
+    if synopsis:
+        parts.append(f"简介：{synopsis}")
+    extra = requirement.strip()
+    if extra and extra not in {title, synopsis}:
+        parts.append(extra)
+    return "\n".join(parts).strip()
+
+
+def _write_given_book(host: Host, payload: dict) -> None:
+    title = str(payload.get("title") or "").strip()[:24]
+    synopsis = str(payload.get("synopsis") or "").strip()[:1000]
+    if not title or not synopsis:
+        return
+    host.book.info.save(BookMetadata(title=title, synopsis=synopsis))
 
 
 def _short(exc: BaseException) -> str:

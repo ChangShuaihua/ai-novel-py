@@ -52,12 +52,13 @@ class BookLock:
 
 
 class Host:
-    def __init__(self, book: Book, completer, prompts: dict[str, str], workers: dict, lock: BookLock) -> None:
+    def __init__(self, book: Book, completer, prompts: dict[str, str], workers: dict, lock: BookLock, style: str = "") -> None:
         self.book = book
         self.completer = completer
         self.prompts = prompts
         self.workers = workers
         self.lock = lock
+        self.style = style
         self.engine = Engine(book, workers, completer, prompts)
         self.decisions = DecisionStore(book.root)
 
@@ -93,7 +94,7 @@ class Host:
                     base = bundle.styles.get(style, "").strip()
                     bundle.styles[style] = f"{base}\n\n{note}" if base else note
             workers = build_workers(root, style=style, bundle=bundle, include_home=include_home)
-            return cls(book, completer, bundle.prompts, workers, lock)
+            return cls(book, completer, bundle.prompts, workers, lock, style=style)
         except Exception:
             lock.release()
             raise
@@ -107,7 +108,7 @@ class Host:
     def start(self, requirement: str, *, max_rounds: int | None = None) -> RunResult:
         self.book.progress.save(Progress(phase=Phase.INIT))
         self.book.checkpoints.reset()
-        meta = self.book.run_meta.init(style="", provider="", model="")
+        meta = self.book.run_meta.init(style=self.style, provider="", model="")
         meta.start_prompt = requirement
         self.book.run_meta.save(meta)
         try:

@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from ainovel.agents import AgentLoopError, CheckpointGuardError, build_workers
-from ainovel.agents.catalog import ARCHITECT_TOOLS, EDITOR_TOOLS, WRITER_TOOLS
-from ainovel.agents.workers import editor_message, editor_steps
+from ainovel.agents.catalog import ARCHITECT_TOOLS, CHARACTER_TOOLS, EDITOR_TOOLS, WRITER_TOOLS
+from ainovel.agents.workers import architect_steps, editor_message, editor_steps
 from ainovel.flow.model import Duty
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
@@ -47,6 +47,9 @@ def test_tool_sets_match_the_three_roles(tmp_path: Path):
     assert workers["architect_long"].tool_names == ARCHITECT_TOOLS
     assert workers["writer"].tool_names == WRITER_TOOLS
     assert workers["editor"].tool_names == EDITOR_TOOLS
+    assert workers["character"].tool_names == CHARACTER_TOOLS
+    assert "save_foundation" not in workers["character"].tool_names
+    assert "人物要能在对话和选择里被认出来" in workers["character"].system_prompt
     assert "commit_chapter" not in workers["architect_short"].tool_names
     assert "save_foundation" not in workers["writer"].tool_names
     assert "draft_chapter" not in workers["editor"].tool_names
@@ -55,6 +58,15 @@ def test_tool_sets_match_the_three_roles(tmp_path: Path):
     assert editor_steps("写卷摘要") == ("volume_summary",)
     assert editor_steps("写卷摘要", Duty.ARC_REVIEW) == ("review",)
     assert "save_review" in editor_message("写卷摘要", Duty.ARC_REVIEW)
+
+
+def test_architect_steps_follow_the_duty():
+    expand = architect_steps("展开第 1 卷第 2 弧（expand_next_arc）", Duty.EXPAND_ARC)
+    assert expand == ("expand_next_arc",)
+    fill = architect_steps("补齐基础设定与作品信息缺项：characters、world_rules；book 使用 save_book", Duty.FILL_FOUNDATION)
+    assert "characters" in fill and "update_compass" in fill
+    assert "expand_next_arc" not in fill
+    assert "book" not in architect_steps("展开下一弧", Duty.EXPAND_ARC)
 
 
 def test_foreign_tool_cannot_enter_the_agent(tmp_path: Path):
@@ -89,7 +101,9 @@ def test_writer_commit_ends_the_run(tmp_path: Path):
     book.progress.save(Progress(phase=Phase.WRITING, total_chapters=3, flow=FlowState.WRITING))
     bundle = load_bundle("fantasy", tmp_path, include_home=False)
     worker = build_workers(tmp_path, style="fantasy", bundle=bundle, include_home=False)["writer"]
-    assert worker.system_prompt == build_writer_prompt(bundle.prompts["writer.md"], bundle.voice, bundle.styles["fantasy"])
+    protocol = build_writer_prompt(bundle.prompts["writer.md"], bundle.voice, bundle.styles["fantasy"])
+    assert worker.system_prompt.startswith(protocol)
+    assert "一章只完成任务里的这一章" in worker.system_prompt
     assert "{{VOICE}}" not in worker.system_prompt
     assert "奇幻冒险风格" in worker.system_prompt
     script = _Script(

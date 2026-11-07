@@ -175,6 +175,20 @@ class _Steer:
 
     def complete(self, messages, tools):
         if not tools:
+            user = next((item["content"] for item in messages if item["role"] == "user"), "")
+            if "last_report" in user:
+                move = json.loads(user)["legal_moves"][0]
+                return Completion(
+                    content=json.dumps(
+                        {
+                            "decision": "dispatch",
+                            "move_id": move["move_id"],
+                            "task": move["task"],
+                            "reason": "沿用菜单第一项",
+                        },
+                        ensure_ascii=False,
+                    )
+                )
             return Completion(
                 content=json.dumps(
                     {

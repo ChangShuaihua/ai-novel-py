@@ -1,6 +1,6 @@
 import { cloneElement, useEffect, useId, useRef, useState } from "react"
 
-import { addComment, bookHref, checkModel, composeSynopsis, currentUsername, emptyTrash, getLibrary, getModel, getPublicBook, getPublicLibrary, moveBook, pickSaveFile, publishBook, saveModel, sendIntent, useSnapshot } from "./api.js"
+import { addComment, bookHref, checkModel, composeSynopsis, currentUsername, emptyTrash, getLibrary, getModel, getPublicBook, getPublicLibrary, moveBook, pickSaveFile, publishBook, saveModel, sendIntent, useLiveText, useSnapshot } from "./api.js"
 import { blocks, deskState } from "./deskState.js"
 import {
   DEFAULT_MODEL,
@@ -16,7 +16,7 @@ import {
 import { assistView } from "./assist.js"
 import { formatOutline, parseOutline, reorder } from "./beats.js"
 import { bookTitle, exportFileName, flowLabel, folderName, holdLabel, phaseLabel, shortPath } from "./labels.js"
-import { markLabel, progressCaption, progressView } from "./progressView.js"
+import { markLabel, phaseHref, progressCaption, progressView, stagePath } from "./progressView.js"
 
 const STARRED = "ainovel-stars"
 const SHELF_VIEWS = [
@@ -302,7 +302,7 @@ export function Shelf({ onLeave }) {
               ) : (
                 <ul className="bookcase">
                   {shown.map((book, index) => {
-                    const href = bookHref("/desk", book.directory)
+                    const href = bookHref(stagePath(book), book.directory)
                     const title = shelfTitle(book)
                     const known = book.total_chapters > 0
                     const pct = known ? Math.min(100, Math.round((100 * book.completed_count) / book.total_chapters)) : 0
@@ -1131,7 +1131,9 @@ export function NewBook({ directory, onLeave }) {
   const [keepDraft, setKeepDraft] = useState(Boolean(saved?.keep))
   const [bookId, setBookId] = useState(linked)
   const [error, setError] = useState("")
+  const [homePhase, setHomePhase] = useState("")
   const [busy, setBusy] = useState("")
+  const liveSynopsis = useLiveText("channel:synopsis", busy === "synopsis")
 
   useEffect(() => {
     setBookId(linked)
@@ -1225,11 +1227,12 @@ export function NewBook({ directory, onLeave }) {
       })
       if (snap.error && !snap.running) {
         if (String(snap.directory || "").startsWith("db:")) setBookId(snap.directory)
+        setHomePhase(snap.phase || "")
         setError(snap.error)
         return
       }
       if (!keepDraft) localStorage.removeItem(DRAFT_KEY)
-      window.location.hash = bookHref("/desk", snap.directory)
+      window.location.hash = bookHref(stagePath(snap), snap.directory)
     } catch (reason) {
       setError(reason.message)
     } finally {
@@ -1252,7 +1255,7 @@ export function NewBook({ directory, onLeave }) {
             </button>
           )}
         >
-          <textarea value={synopsis} maxLength={1000} rows={4} placeholder="请输入作品简介，支持 Markdown" disabled={Boolean(busy)} onChange={(event) => setSynopsis(event.target.value)} />
+          <textarea value={busy === "synopsis" && liveSynopsis ? liveSynopsis : synopsis} maxLength={1000} rows={4} placeholder="请输入作品简介，支持 Markdown" disabled={Boolean(busy)} onChange={(event) => setSynopsis(event.target.value)} />
         </Field>
         <Field label="文风">
           <StylePick value={style} options={styleOptions} disabled={Boolean(busy)} onChange={setStyle} />
@@ -1275,7 +1278,7 @@ export function NewBook({ directory, onLeave }) {
           <p className="banner" role="status">
             {error}{" "}
             {error.includes("还没接入模型") ? <a href="#/model">接入模型</a> : null}
-            {bookId && error.includes("继续") ? <a href={bookHref("/desk", bookId)}>回到这本</a> : null}
+            {bookId && error.includes("继续") ? <a href={bookHref(stagePath({ phase: homePhase }), bookId)}>回到这本</a> : null}
           </p>
         ) : null}
         <div className="manuscript-foot">
@@ -1292,7 +1295,7 @@ export function NewBook({ directory, onLeave }) {
   )
 }
 
-function ProgressBoard({ snapshot, focus = 0, onPick }) {
+function ProgressBoard({ directory, snapshot, focus = 0, onPick, current = "", chapters = true }) {
   const view = progressView(snapshot)
   const tip = focus || view.written || 0
   const span = view.total > 1 ? `${Math.max(0, (tip - 1) / (view.total - 1)) * 100}%` : "0%"
@@ -1300,18 +1303,23 @@ function ProgressBoard({ snapshot, focus = 0, onPick }) {
     <>
       <nav className="phase-nav" aria-label="创作阶段">
         <ol className="phase-track">
-          {view.phases.map((item) => (
-            <li
-              key={item.id}
-              className={item.state === "current" && snapshot.running ? "current live" : item.state}
-              aria-current={item.state === "current" ? "step" : undefined}
-            >
-              <span>{phaseLabel(item.id)}</span>
-            </li>
-          ))}
+          {view.phases.map((item) => {
+            const path = phaseHref(item.id, snapshot)
+            const href = path ? bookHref(path, directory) : ""
+            const label = phaseLabel(item.id)
+            return (
+              <li
+                key={item.id}
+                className={item.state === "current" && snapshot.running ? "current live" : item.state}
+                aria-current={item.state === "current" ? "step" : undefined}
+              >
+                {href ? <a href={href} aria-current={current === path ? "page" : undefined}>{label}</a> : <span>{label}</span>}
+              </li>
+            )
+          })}
         </ol>
       </nav>
-      <div className="chapter-progress">
+      {chapters ? <div className="chapter-progress">
         {view.marks ? (
           <ol className="chapter-track" style={{ "--progress": span }} aria-label="章节进度">
             {view.marks.map((mark) => {
@@ -1333,12 +1341,12 @@ function ProgressBoard({ snapshot, focus = 0, onPick }) {
             <span style={{ width: `${Math.round(view.ratio * 100)}%` }} />
           </div>
         ) : <p className="quiet-text">章数还没定</p>}
-      </div>
+      </div> : null}
     </>
   )
 }
 
-function BookBoard({ directory, snapshot, current, lede, focus = 0, onPick, extra }) {
+function BookBoard({ directory, snapshot, current, lede, focus = 0, onPick, extra, chapters = true }) {
   const phase = phaseLabel(snapshot.phase)
   const flow = flowLabel(snapshot.flow)
   return (
@@ -1353,9 +1361,9 @@ function BookBoard({ directory, snapshot, current, lede, focus = 0, onPick, extr
           <p>{progressCaption(progressView(snapshot), flow && flow !== phase ? flow : "")}</p>
           {extra}
         </div>
-        <BookSwitch directory={directory} current={current} importStatus={snapshot.import_status} />
+        <BookSwitch directory={directory} current={current} importStatus={snapshot.import_status} snapshot={snapshot} />
       </header>
-      <ProgressBoard snapshot={snapshot} focus={focus} onPick={onPick} />
+      <ProgressBoard directory={directory} snapshot={snapshot} focus={focus} onPick={onPick} current={current} chapters={chapters} />
     </section>
   )
 }
@@ -1364,12 +1372,22 @@ export function DeskScreen({ directory, onLeave }) {
   const { snapshot, loadError, setSnapshot } = useSnapshot(directory)
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
+  const live = useLiveText(directory, Boolean(snapshot?.running && (snapshot.phase === "writing" || snapshot.phase === "complete" || snapshot.guide)))
+
+  useEffect(() => {
+    if (!directory || !snapshot || snapshot.guide?.stage) return
+    const next = stagePath(snapshot)
+    if (next !== "/desk") window.location.hash = bookHref(next, directory)
+  }, [directory, snapshot])
 
   if (!directory) return <MissingBook />
   if (!snapshot) return <Loading message={loadError || "正在读取这本书。"} error={Boolean(loadError)} />
 
   const view = deskState(snapshot)
-  const latestChapter = (snapshot.chapters || []).at(-1) || null
+  const completed = snapshot.completed_chapters || []
+  const lastNumber = completed.length ? Number(completed[completed.length - 1]) : 0
+  const latestChapter = (snapshot.chapters || []).find((item) => item.chapter === lastNumber) || (snapshot.chapters || []).at(-1) || null
+  const chapterText = latestChapter?.body || snapshot.latest_excerpt || ""
   const pending = snapshot.pending_steer || ""
   const steerText = pending || draft
   const steerOff = blocks(view, "steer") || Boolean(pending) || busy
@@ -1381,8 +1399,11 @@ export function DeskScreen({ directory, onLeave }) {
       const next = await sendIntent({ directory, action, ...extra })
       setSnapshot(next)
       if (action === "steer") setDraft("")
+      return next
     } catch (reason) {
-      setSnapshot({ ...snapshot, error: reason.message })
+      const failed = { ...snapshot, error: reason.message }
+      setSnapshot(failed)
+      return failed
     } finally {
       setBusy(false)
     }
@@ -1397,7 +1418,7 @@ export function DeskScreen({ directory, onLeave }) {
         <span className="seal" aria-hidden="true">案</span>
         <span className="mark-name">ainovel</span>
       </a>
-      <span className="appbar-here">写作现场</span>
+      <span className="appbar-here">写作</span>
       <div className="appbar-actions">
         <a className="appbar-model" href="#/model">接入模型</a>
         <a className="appbar-model" href="#/pass">改密码</a>
@@ -1433,22 +1454,14 @@ export function DeskScreen({ directory, onLeave }) {
       <div className="desk-grid">
         <section>
           {guiding ? (
-            <GuideStep guide={snapshot.guide} busy={busy || snapshot.running} error={snapshot.error || loadError} onAct={act} />
+            <GuideStep guide={snapshot.guide} busy={busy || snapshot.running} error={snapshot.error || loadError} live={live} onAct={act} />
           ) : (
             <>
           <article className="sheet">
-            {latestChapter?.title ? <h2 className="chapter-name">{latestChapter.title}</h2> : null}
+            {live ? <h2 className="chapter-name">正在写</h2> : latestChapter?.title ? <h2 className="chapter-name">{latestChapter.title}</h2> : null}
             {view.id === "config" ? <p className="sheet-next"><a className="signal" href="#/model">接入模型</a></p> : null}
-            {snapshot.latest_excerpt ? <Galley text={snapshot.latest_excerpt} bare /> : <h2>{view.sentence}</h2>}
+            {live || chapterText ? <Galley text={live || chapterText} bare live={Boolean(live)} /> : <h2>{view.sentence}</h2>}
           </article>
-          {snapshot.latest_instruction ? (
-            <p className="instruction">
-              <span>最近一条指令</span>
-              {snapshot.latest_instruction.task}
-              {snapshot.latest_instruction.reason ? <em>{snapshot.latest_instruction.reason}</em> : null}
-            </p>
-          ) : null}
-          {snapshot.events.length ? <EventList events={snapshot.events} /> : null}
           <form
             className="composer"
             onSubmit={(event) => {
@@ -1497,6 +1510,253 @@ export function DeskScreen({ directory, onLeave }) {
 }
 
 let beatSerial = 0
+
+const AGENT_LABELS = {
+  architect_long: "长篇规划师",
+  architect_short: "短篇规划师",
+  writer: "写作者",
+  editor: "审阅者",
+  character: "人物",
+}
+
+function agentLabel(agent) {
+  if (!agent) return null
+  return <strong>{AGENT_LABELS[agent] || agent}</strong>
+}
+
+function useBookAct(directory, snapshot, setSnapshot) {
+  const [busy, setBusy] = useState(false)
+  async function act(action, extra = {}) {
+    setBusy(true)
+    try {
+      const next = await sendIntent({ directory, action, ...extra })
+      setSnapshot(next)
+      return next
+    } catch (reason) {
+      const failed = { ...(snapshot || {}), error: reason.message }
+      setSnapshot(failed)
+      return failed
+    } finally {
+      setBusy(false)
+    }
+  }
+  return [busy, act]
+}
+
+export function PremiseScreen({ directory, onLeave }) {
+  const { snapshot, loadError, setSnapshot } = useSnapshot(directory)
+  const [busy, act] = useBookAct(directory, snapshot, setSnapshot)
+  const showLive = Boolean(snapshot?.running && (snapshot.phase === "init" || snapshot.phase === "premise" || !snapshot.phase))
+  const live = useLiveText(directory, showLive)
+  useEffect(() => {
+    if (!directory || !snapshot?.running) return
+    if (["outline", "writing", "complete"].includes(snapshot.phase)) {
+      window.location.hash = bookHref(stagePath(snapshot), directory)
+    }
+  }, [directory, snapshot])
+  if (!directory) return <MissingBook />
+  if (!snapshot) return <Loading message={loadError || "正在读取前提。"} error={Boolean(loadError)} />
+  const ready = ["outline", "writing", "complete"].includes(snapshot.phase) || (snapshot.outline || []).some((item) => item.title)
+  return (
+    <WorkRoom here="前提" path="/premise" directory={directory} snapshot={snapshot} onLeave={onLeave} lede="先把前提写清楚。改完，再进入大纲。">
+      {snapshot.error ? <p className="banner" role="status">{snapshot.error}</p> : null}
+      {loadError ? <p className="banner" role="status">{loadError}</p> : null}
+      {live ? <article className="sheet"><h2 className="chapter-name">正在写前提</h2><Galley text={live} bare live /></article> : null}
+      <PremiseForm
+        snapshot={snapshot}
+        disabled={busy || snapshot.running || snapshot.locked}
+        ready={ready}
+        onSave={(premise) => act("save_plan", { premise })}
+        onEnter={() => { window.location.hash = bookHref("/outline", directory) }}
+      />
+    </WorkRoom>
+  )
+}
+
+export function OutlineScreen({ directory, onLeave }) {
+  const { snapshot, loadError, setSnapshot } = useSnapshot(directory)
+  const [busy, act] = useBookAct(directory, snapshot, setSnapshot)
+  const showLive = Boolean(snapshot?.running && snapshot.phase === "outline")
+  const live = useLiveText(directory, showLive)
+  useEffect(() => {
+    if (!directory || !snapshot?.running) return
+    if (["writing", "complete"].includes(snapshot.phase)) {
+      window.location.hash = bookHref(stagePath(snapshot), directory)
+    }
+  }, [directory, snapshot])
+  if (!directory) return <MissingBook />
+  if (!snapshot) return <Loading message={loadError || "正在读取大纲。"} error={Boolean(loadError)} />
+  const ready = snapshot.phase === "writing" || snapshot.phase === "complete"
+  return (
+    <WorkRoom here="大纲" path="/outline" directory={directory} snapshot={snapshot} onLeave={onLeave} lede="大纲可以改。确认之后，再写章节。">
+      {snapshot.error ? <p className="banner" role="status">{snapshot.error}</p> : null}
+      {loadError ? <p className="banner" role="status">{loadError}</p> : null}
+      {live ? <article className="sheet"><h2 className="chapter-name">正在写大纲</h2><Galley text={live} bare live /></article> : null}
+      <OutlineForm
+        snapshot={snapshot}
+        disabled={busy || snapshot.running || snapshot.locked}
+        ready={ready}
+        onSave={(outline) => act("save_plan", { outline })}
+        onEnter={() => { window.location.hash = bookHref("/desk", directory) }}
+      />
+    </WorkRoom>
+  )
+}
+
+function WorkRoom({ here, path, directory, snapshot, onLeave, lede, children }) {
+  return (
+    <div className="room desk-room">
+      <header className="appbar">
+        <a className="mark" href="#/">
+          <span className="seal" aria-hidden="true">案</span>
+          <span className="mark-name">ainovel</span>
+        </a>
+        <span className="appbar-here">{here}</span>
+        <div className="appbar-actions">
+          <a className="appbar-model" href="#/model">接入模型</a>
+          <a className="appbar-model" href="#/pass">改密码</a>
+          {onLeave ? <button type="button" className="appbar-leave" onClick={onLeave}>离开</button> : null}
+        </div>
+      </header>
+      <main className="page">
+        <BookBoard directory={directory} snapshot={snapshot} current={path} lede={lede} chapters={false} />
+        {children}
+      </main>
+    </div>
+  )
+}
+
+function PremiseForm({ snapshot, disabled, ready, onSave, onEnter }) {
+  const [premise, setPremise] = useState(snapshot.premise || "")
+  const [dirty, setDirty] = useState(false)
+  const [note, setNote] = useState("")
+  useEffect(() => {
+    if (dirty) return
+    setPremise(snapshot.premise || "")
+  }, [snapshot.premise, dirty])
+
+  async function save(event) {
+    event?.preventDefault()
+    if (!premise.trim()) {
+      setNote("先写下前提。")
+      return null
+    }
+    setNote("")
+    const next = await onSave(premise.trim())
+    if (!next?.error) setDirty(false)
+    return next
+  }
+
+  async function enter(event) {
+    event.preventDefault()
+    if (dirty) {
+      const next = await save()
+      if (!next || next.error) return
+    }
+    onEnter()
+  }
+
+  return (
+    <form className="plan-sheet" onSubmit={save}>
+      <header>
+        <h2>前提</h2>
+        <p>{snapshot.running ? "正在生成。停下来之后可以改。" : "这里只改前提。大纲在下一页。"}</p>
+      </header>
+      <label>
+        前提
+        <textarea
+          value={premise}
+          rows={8}
+          disabled={disabled}
+          placeholder="这个故事是谁、想要什么、什么挡住了他"
+          onChange={(event) => {
+            setDirty(true)
+            setPremise(event.target.value)
+          }}
+        />
+      </label>
+      <div className="composer-actions">
+        <button className="quiet" type="submit" disabled={disabled}>保存前提</button>
+        {ready ? <button className="signal" type="button" onClick={enter}>进入大纲</button> : <button className="signal" type="button" disabled>大纲出来后进入</button>}
+      </div>
+      {note ? <p className="banner" role="status">{note}</p> : null}
+    </form>
+  )
+}
+
+function OutlineForm({ snapshot, disabled, ready, onSave, onEnter }) {
+  const incoming = JSON.stringify(snapshot.outline || [])
+  const [beats, setBeats] = useState(() => beatsFrom(snapshot.outline))
+  const [dirty, setDirty] = useState(false)
+  const [note, setNote] = useState("")
+  useEffect(() => {
+    if (dirty) return
+    setBeats(beatsFrom(snapshot.outline))
+  }, [incoming, dirty])
+
+  function outline() {
+    return beats
+      .map((item) => ({ title: item.title.trim(), summary: item.summary.trim() }))
+      .filter((item) => item.title)
+  }
+
+  async function save(event) {
+    event?.preventDefault()
+    const items = outline()
+    if (!items.length) {
+      setNote("至少留下一章。")
+      return null
+    }
+    setNote("")
+    const next = await onSave(items)
+    if (!next?.error) setDirty(false)
+    return next
+  }
+
+  async function enter(event) {
+    event.preventDefault()
+    if (dirty) {
+      const next = await save()
+      if (!next || next.error) return
+    }
+    onEnter()
+  }
+
+  return (
+    <form className="plan-sheet" onSubmit={save}>
+      <header>
+        <h2>大纲</h2>
+        <p>{snapshot.running ? "正在生成。停下来之后可以改。" : "这里只改大纲。章节在写作页。"}</p>
+      </header>
+      <BeatList
+        items={beats}
+        disabled={disabled}
+        addLabel="加一章"
+        placeholder="这一章发生什么"
+        onChange={(next) => {
+          setDirty(true)
+          setBeats(next)
+        }}
+      />
+      <div className="composer-actions">
+        <button className="quiet" type="submit" disabled={disabled}>保存大纲</button>
+        {ready ? <button className="signal" type="button" onClick={enter}>进入写作</button> : <button className="signal" type="button" disabled>可以写章节时再进入</button>}
+      </div>
+      {note ? <p className="banner" role="status">{note}</p> : null}
+    </form>
+  )
+}
+
+function beatsFrom(outline) {
+  const items = Array.isArray(outline) ? outline : []
+  if (!items.length) return [{ id: `o${beatSerial += 1}`, title: "", summary: "", open: true }]
+  return items.map((item, index) => ({
+    id: `o${beatSerial += 1}`,
+    title: item.title || "",
+    summary: item.summary || "",
+    open: index === 0,
+  }))
+}
 
 function stampOutline(text) {
   const items = parseOutline(text)
@@ -1615,7 +1875,7 @@ function Assistant({ snapshot }) {
   const latest = (snapshot.chapters || []).at(-1)
   const writing = guide && (guide.stage === "chapter" || guide.stage === "done")
   const view = assistView({
-    outline: guide?.outline || [],
+    outline: snapshot.guide?.outline?.length ? snapshot.guide.outline : (snapshot.outline || []),
     chapter: writing ? guide.chapter : 0,
     body: (writing ? guide.chapter_body : "") || latest?.body || "",
     synopsis: guide?.synopsis || "",
@@ -1690,6 +1950,24 @@ function Assistant({ snapshot }) {
           value={`${holdLabel(snapshot.advance_hold.after)}${snapshot.advance_hold.target_chapter ? ` · 第 ${snapshot.advance_hold.target_chapter} 章` : ""} · ${snapshot.advance_hold.reason}`}
         />
       ) : null}
+      {snapshot.latest_instruction ? (
+        <section>
+          <h3>这一步</h3>
+          <p className="instruction">
+            {agentLabel(snapshot.latest_instruction.agent)}
+            {snapshot.latest_instruction.task}
+            {snapshot.latest_instruction.reason ? <em>{snapshot.latest_instruction.reason}</em> : null}
+          </p>
+        </section>
+      ) : null}
+      {snapshot.events.length ? (
+        <section>
+          <h3>记录</h3>
+          <ol className="events">
+            {[...snapshot.events].reverse().map((event, index) => <li key={`${index}-${event}`}>{event}</li>)}
+          </ol>
+        </section>
+      ) : null}
       {snapshot.context_usage ? <RailItem label="上下文占用" value={snapshot.context_usage} /> : null}
       {snapshot.phase === "complete" && snapshot.report ? (
         <div className="fact report-fact">
@@ -1701,7 +1979,7 @@ function Assistant({ snapshot }) {
   )
 }
 
-function GuideStep({ guide, busy, error, onAct }) {
+function GuideStep({ guide, busy, error, live = "", onAct }) {
   const [title, setTitle] = useState(guide.title || "")
   const [synopsis, setSynopsis] = useState(guide.synopsis || "")
   const [outline, setOutline] = useState(guide.outline_text || "")
@@ -1750,6 +2028,7 @@ function GuideStep({ guide, busy, error, onAct }) {
       <div className="guide-title">
         <h2>{heading}<i>{seal}</i></h2>
       </div>
+      {live ? <p className="live-draft" aria-live="off">{live}<span className="caret" /></p> : null}
       {stage === "title" ? (
         <>
           <Field label="小说标题" count={`${title.length}/24`}>
@@ -1902,7 +2181,9 @@ export function Reader({ directory }) {
   const chapters = new Map(chapterRows.map((chapter) => [chapter.chapter, chapter]))
   const selected = current == null ? null : chapters.get(current)
   const done = new Set(snapshot.completed_chapters)
-  const outline = Array.isArray(snapshot.guide?.outline) ? snapshot.guide.outline : []
+  const outline = Array.isArray(snapshot.outline) && snapshot.outline.length
+    ? snapshot.outline
+    : (Array.isArray(snapshot.guide?.outline) ? snapshot.guide.outline : [])
   const catalog = outline.length
     ? outline.map((item) => ({
       n: Number(item.chapter),
@@ -1984,7 +2265,7 @@ export function ImportScreen({ directory }) {
   return (
     <main className="page">
       <header className="page-head">
-        <p className="eyebrow"><a href={bookHref("/desk", directory)}>{bookTitle(snapshot)}</a></p>
+        <p className="eyebrow"><a href={bookHref(stagePath(snapshot), directory)}>{bookTitle(snapshot)}</a></p>
         <h1>导入确认</h1>
         <p className="lede">{snapshot.import_detail || "还没有导入。"}</p>
       </header>
@@ -2025,13 +2306,18 @@ export function ImportScreen({ directory }) {
   )
 }
 
-function Galley({ text, bare = false }) {
+function Galley({ text, bare = false, live = false }) {
+  const end = useRef(null)
   const paragraphs = String(text || "").split(/\n+/).filter((line) => line.trim())
+  useEffect(() => {
+    if (live) end.current?.scrollIntoView({ block: "nearest" })
+  }, [text, live])
   return (
     <div className={bare ? "galley-body" : "galley"}>
       {paragraphs.map((paragraph, index) => (
         <p key={index} className={sceneBreak(paragraph) ? "scene" : undefined}>{paragraph}</p>
       ))}
+      {live ? <span className="caret" ref={end} /> : null}
     </div>
   )
 }
@@ -2039,19 +2325,6 @@ function Galley({ text, bare = false }) {
 function sceneBreak(text) {
   const line = text.trim()
   return line.length > 0 && line.length <= 8 && !/[。！？，、；：]/.test(line)
-}
-
-function EventList({ events }) {
-  return (
-    <section className="event-block">
-      <h3>事件</h3>
-      {events.length === 0 ? <p className="quiet-text empty-events">尚无事件</p> : (
-        <ol className="events">
-          {events.map((event, index) => <li key={`${index}-${event}`}>{event}</li>)}
-        </ol>
-      )}
-    </section>
-  )
 }
 
 function RailItem({ label, value, dim = false }) {
@@ -2204,10 +2477,12 @@ function CopyRow({ label, value, count, copied, onCopy }) {
   )
 }
 
-function BookSwitch({ directory, current, importStatus = "" }) {
+function BookSwitch({ directory, current, importStatus = "", snapshot }) {
   const showImport = current === "/import" || importStatus === "await_confirmation" || importStatus === "working" || importStatus === "failed"
+  const home = stagePath(snapshot || {})
+  const homeLabel = home === "/outline" ? "大纲" : home === "/desk" ? "写作" : "前提"
   const items = [
-    ["/desk", "写作现场"],
+    [home, homeLabel],
     ["/read", "章节阅读"],
     ...(showImport ? [["/import", "导入确认"]] : []),
     ["/listing", "投稿资料"],

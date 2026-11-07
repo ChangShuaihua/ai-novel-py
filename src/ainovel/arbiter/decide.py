@@ -6,6 +6,7 @@ from ainovel.arbiter.validate import (
     validate_failure,
     validate_intervention,
     validate_plan_start,
+    validate_schedule,
 )
 from ainovel.llm.errors import ProviderError
 
@@ -28,6 +29,12 @@ def decide_intervention(completer, system: str, facts: dict, text: str) -> dict:
 
 def decide_failure(completer, system: str, facts: dict) -> dict:
     return _decide(completer, system, facts, lambda decision: validate_failure(decision, facts))
+
+
+def decide_schedule(completer, system: str, moves: list[dict], report: dict | None) -> dict:
+    """正常调度。事实由调用方收齐，这里不读盘。"""
+    payload = {"legal_moves": moves, "last_report": report}
+    return _decide(completer, system, payload, lambda decision: validate_schedule(decision, moves))
 
 
 def _decide(completer, system: str, payload: dict, validate, attempts: int = 4) -> dict:

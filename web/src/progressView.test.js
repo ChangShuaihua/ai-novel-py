@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { markLabel, progressCaption, progressView } from "./progressView.js"
+import { markLabel, phaseHref, progressCaption, progressView, stagePath } from "./progressView.js"
 
 test("大纲阶段标出当前位置，章格都还没写", () => {
   const view = progressView({ phase: "outline", total_chapters: 12, completed_chapters: [], next_chapter: 1 })
@@ -39,6 +39,19 @@ test("写过大纲的章节要照实说", () => {
   assert.deepEqual(view.beyond, [13])
   assert.equal(view.marks.every((mark) => mark.state === "done"), true)
   assert.equal(progressCaption(view, ""), "大纲 12 章已写完 · 又写到第 13 章 · 25,524 字")
+})
+
+test("前提、大纲、写作各自进自己的页面", () => {
+  assert.equal(stagePath({ phase: "init" }), "/premise")
+  assert.equal(stagePath({ phase: "premise" }), "/premise")
+  assert.equal(stagePath({ phase: "outline" }), "/outline")
+  assert.equal(stagePath({ phase: "writing" }), "/desk")
+  assert.equal(stagePath({ phase: "complete" }), "/desk")
+  assert.equal(stagePath({ guide: { stage: "title" } }), "/desk")
+  assert.equal(phaseHref("outline", { phase: "premise" }), "")
+  assert.equal(phaseHref("outline", { phase: "outline" }), "/outline")
+  assert.equal(phaseHref("writing", { phase: "writing" }), "/desk")
+  assert.equal(phaseHref("init", { phase: "writing" }), "")
 })
 
 test("章数很多时不再逐格展开", () => {

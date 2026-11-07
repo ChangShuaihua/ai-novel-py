@@ -12,16 +12,18 @@ function api(path) {
 }
 
 async function timedFetch(url, options = {}) {
+  const timeout = options.timeout ?? REQUEST_TIMEOUT
+  const { timeout: _timeout, ...rest } = options
   const controller = new AbortController()
-  const external = options.signal
+  const external = rest.signal
   const abort = () => controller.abort(external?.reason)
   if (external) {
     if (external.aborted) abort()
     else external.addEventListener("abort", abort, { once: true })
   }
-  const timer = window.setTimeout(() => controller.abort(new Error("请求超时")), REQUEST_TIMEOUT)
+  const timer = window.setTimeout(() => controller.abort(new Error("请求超时")), timeout)
   try {
-    return await fetch(url, { ...options, signal: controller.signal })
+    return await fetch(url, { ...rest, signal: controller.signal })
   } catch (error) {
     if (controller.signal.aborted && !external?.aborted) throw new Error("控制室响应超时，请稍后重试")
     throw error
@@ -243,6 +245,7 @@ export function composeSynopsis(payload) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    timeout: 120000,
   })
 }
 
@@ -259,7 +262,58 @@ export function sendIntent(payload) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    timeout: 120000,
   })
+}
+
+export function useLiveText(target, enabled) {
+  const [text, setText] = useState("")
+  const key = typeof target === "string" ? target : ""
+  useEffect(() => {
+    if (!enabled || !key) {
+      setText("")
+      return undefined
+    }
+    const controller = new AbortController()
+    const query = new URLSearchParams(key.startsWith("channel:") ? { channel: key.slice(8) } : { directory: key })
+    const headers = { Accept: "text/event-stream" }
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+    fetch(api(`/api/live?${query}`), { headers, credentials: "include", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok || !response.body) return
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let pending = ""
+        while (true) {
+          const step = await reader.read()
+          if (step.done) return
+          pending += decoder.decode(step.value, { stream: true })
+          let cut = pending.indexOf("\n\n")
+          while (cut >= 0) {
+            const frame = pending.slice(0, cut)
+            pending = pending.slice(cut + 2)
+            const data = frame
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trim())
+              .join("\n")
+            if (data) {
+              try {
+                const event = JSON.parse(data)
+                if (event.reset) setText(event.text || "")
+                else if (event.text) setText((prev) => prev + event.text)
+              } catch {
+                // 半包或心跳以外的残帧先丢掉，下一帧还会接上。
+              }
+            }
+            cut = pending.indexOf("\n\n")
+          }
+        }
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [key, enabled])
+  return text
 }
 
 export function useSnapshot(directory) {

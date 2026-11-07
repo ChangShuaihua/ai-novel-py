@@ -9,6 +9,7 @@ from ainovel.tools.foundation import (
     resolve_outline_feedback,
     revise_outline,
     save_book,
+    save_characters,
     save_foundation,
 )
 from ainovel.tools.review import save_arc_summary, save_review, save_volume_summary
@@ -24,6 +25,7 @@ TOOLS = {
     "novel_context": novel_context,
     "read_chapter": read_chapter,
     "save_book": save_book,
+    "save_characters": save_characters,
     "save_foundation": save_foundation,
     "audit_foundation": audit_foundation,
     "plan_chapter": plan_chapter,

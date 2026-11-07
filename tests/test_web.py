@@ -118,6 +118,100 @@ def test_report_only_when_complete(tmp_path: Path):
     assert "字数：12" in report
 
 
+def test_snapshot_shows_the_saved_dispatch(tmp_path: Path):
+    root = tmp_path / "book"
+    _book(root)
+    (root / "meta").mkdir(exist_ok=True)
+    (root / "meta" / "inflight_dispatch.json").write_text(
+        json.dumps(
+            {"agent": "character", "duty": "design_characters", "task": "只补人物", "reason": "只剩人物"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    instruction = build_snapshot(root)["latest_instruction"]
+    assert instruction["agent"] == "character"
+    assert instruction["task"] == "只补人物"
+
+
+def test_reader_plan_stays_visible_and_editable(tmp_path: Path):
+    root = tmp_path / "book"
+    book = Book.open(root, writable=True)
+    book.info.save(BookMetadata(title="推门", synopsis="林舟推开一扇门。"))
+    book.progress.save(Progress(phase=Phase.WRITING, flow=FlowState.WRITING, completed_chapters=[1], total_chapters=2))
+    (root / "premise.md").write_text("林舟要出门。\n", encoding="utf-8")
+    (root / "outline.json").write_text(
+        json.dumps([{"title": "开端", "summary": "推门"}, {"title": "上路", "summary": "继续"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    seen = build_snapshot(root)
+    assert seen["premise"] == "林舟要出门。"
+    assert [item["title"] for item in seen["outline"]] == ["开端", "上路"]
+
+    desk = Desk(library_path=tmp_path / "library.json", config_path=tmp_path / "config.json", books_root=tmp_path / "new")
+    saved = desk.intent(
+        {
+            "action": "save_plan",
+            "directory": str(root),
+            "premise": "林舟要回家。",
+            "outline": [{"title": "归途", "summary": "他推开门"}, {"title": "灯", "summary": "灯还亮着"}],
+        }
+    )
+    assert saved["error"] == ""
+    assert saved["premise"] == "林舟要回家。"
+    assert saved["phase"] == "writing"
+    assert [item["title"] for item in saved["outline"]] == ["归途", "灯"]
+    desk._running = True
+    desk._active = root
+    blocked = desk.intent({"action": "save_plan", "directory": str(root), "premise": "不该写上。"})
+    assert "暂停" in blocked["error"]
+    assert (root / "premise.md").read_text(encoding="utf-8").strip() == "林舟要回家。"
+
+
+def test_layered_outline_edit_keeps_written_chapters(tmp_path: Path):
+    root = tmp_path / "layered"
+    book = Book.open(root, writable=True)
+    book.progress.save(
+        Progress(
+            phase=Phase.WRITING,
+            flow=FlowState.WRITING,
+            completed_chapters=[1, 2],
+            total_chapters=2,
+            layered=True,
+        )
+    )
+    (root / "layered_outline.json").write_text(
+        json.dumps(
+            [{"arcs": [{"chapters": [{"title": "甲", "summary": "一"}, {"title": "乙", "summary": "二"}]}]}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    desk = Desk(library_path=tmp_path / "library.json", config_path=tmp_path / "config.json", books_root=tmp_path / "new")
+    refused = desk.intent(
+        {"action": "save_plan", "directory": str(root), "outline": [{"title": "只剩一章", "summary": "不够"}]}
+    )
+    assert "已写完" in refused["error"]
+    saved = desk.intent(
+        {
+            "action": "save_plan",
+            "directory": str(root),
+            "outline": [
+                {"title": "甲改", "summary": "一"},
+                {"title": "乙改", "summary": "二"},
+                {"title": "丙", "summary": "三"},
+            ],
+        }
+    )
+    assert saved["error"] == ""
+    assert saved["phase"] == "writing"
+    assert [item["title"] for item in saved["outline"]] == ["甲改", "乙改", "丙"]
+    progress = Book.open(root, writable=False).progress.load()
+    assert progress is not None
+    assert progress.layered is True
+    assert progress.total_chapters == 3
+
+
 def test_start_refuses_a_book_that_already_has_progress(tmp_path: Path):
     root = tmp_path / "book"
     book = _book(root)

@@ -16,6 +16,8 @@ _PROMPT_FILES = (
     "arbiter-plan-start.md",
     "arbiter-intervention.md",
     "arbiter-failure.md",
+    "arbiter-schedule.md",
+    "character.md",
 )
 _GLOBAL_HEADING = "## 用户全局文风覆盖（以下要求优先于项目默认）"
 _BOOK_HEADING = "## 本书文风覆盖（以下要求优先于以上全部）"

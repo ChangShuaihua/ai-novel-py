@@ -244,6 +244,9 @@ def test_new_book_uses_the_database_id_instead_of_a_folder(tmp_path: Path):
     assert not (tmp_path / "new").exists()
     assert "secret-key" not in json.dumps(desk.library(), ensure_ascii=False)
     assert desk.library()["books"][0]["directory"] == "db:7"
+    desk.shutdown()
+    assert not (shelf.root / "meta" / "guide.json").exists()
+    assert (shelf.root / "meta" / "run.json").is_file()
     with pytest.raises(DeskError, match="不用选目录"):
         desk.attach(str(tmp_path))
     desk.shutdown()

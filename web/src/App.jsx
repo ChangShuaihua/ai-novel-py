@@ -2,13 +2,15 @@ import { Component, useEffect, useState } from "react"
 
 import { logout, restoreSession } from "./api.js"
 import { Login, PasswordScreen } from "./gate.jsx"
-import { DeskScreen, ImportScreen, Library, LibraryReader, ListingScreen, ModelScreen, NewBook, Reader, Shelf } from "./screens.jsx"
+import { DeskScreen, ImportScreen, Library, LibraryReader, ListingScreen, ModelScreen, NewBook, OutlineScreen, PremiseScreen, Reader, Shelf } from "./screens.jsx"
 
 const SCREEN = {
   "/": "书架",
   "/model": "接入模型",
   "/new": "新书",
-  "/desk": "写作现场",
+  "/premise": "前提",
+  "/outline": "大纲",
+  "/desk": "写作",
   "/read": "章节阅读",
   "/import": "导入确认",
   "/listing": "投稿资料",
@@ -61,6 +63,8 @@ function Studio({ onLeave }) {
   if (route.path === "/library") return <Library onLeave={onLeave} />
   if (route.path === "/library/read") return <LibraryReader directory={route.directory} onLeave={onLeave} />
   if (route.path === "/new") return <NewBook directory={route.directory} onLeave={onLeave} />
+  if (route.path === "/premise") return <PremiseScreen directory={route.directory} onLeave={onLeave} />
+  if (route.path === "/outline") return <OutlineScreen directory={route.directory} onLeave={onLeave} />
   if (route.path === "/desk") return <DeskScreen directory={route.directory} onLeave={onLeave} />
   if (route.path === "/model") return <ModelScreen onLeave={onLeave} />
   if (route.path === "/pass") return <PasswordScreen onLeave={onLeave} />
@@ -144,7 +148,7 @@ function readRoute() {
   const raw = window.location.hash.replace(/^#/, "") || "/"
   const [path, query = ""] = raw.split("?")
   const params = new URLSearchParams(query)
-  const known = ["/", "/library", "/library/read", "/model", "/new", "/desk", "/read", "/import", "/listing", "/pass"]
+  const known = ["/", "/library", "/library/read", "/model", "/new", "/premise", "/outline", "/desk", "/read", "/import", "/listing", "/pass"]
   return {
     path: known.includes(path) ? path : "/",
     directory: params.get("directory") || "",

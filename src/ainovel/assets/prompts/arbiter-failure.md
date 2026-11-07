@@ -21,4 +21,8 @@ Worker 期间可能落了 plan/draft/edit 等中间产物，但它们不等于�
 - 任务文本本身可能有歧义 → `reroute` 同一 agent 但改写更明确的 task
 - 无法判断 → `abort`（宁可停下等人，不做无谓消耗）
 
-dispatch.agent 只能是 architect_long / architect_short / writer / editor。
+`facts.legal_moves` 非空时，`reroute` 必须从中选一个 `move_id`，并另写 `task` 与 `reason`。此时 `dispatch` 为 `null`，不能发明菜单外的代理或职责。
+
+`legal_moves` 为空时，才使用 `dispatch`。`dispatch.agent` 只能是 architect_long / architect_short / writer / editor。
+
+`retry` 只在本场面合法。它不清零连续无进展计数，到硬停次数后引擎不再采纳。

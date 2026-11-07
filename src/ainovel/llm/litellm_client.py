@@ -5,11 +5,13 @@ from typing import Any
 
 from ainovel.llm.classify import classify_exception
 from ainovel.llm.errors import ProviderError
-from ainovel.llm.stream import aggregate_chunks, read_until_idle
+from ainovel.llm.stream import ArticleTap, ProseTap, aggregate_chunks, read_until_idle
 from ainovel.llm.types import Completion, ModelRef
 
 
 class LiteLLMTransport:
+    streams = True
+
     def __init__(
         self,
         *,
@@ -28,6 +30,10 @@ class LiteLLMTransport:
         tools: list[dict],
         *,
         max_tokens: int | None = None,
+        on_text=None,
+        on_begin=None,
+        stream_mode: str = "article",
+        stream_fields=None,
     ) -> Completion:
         kwargs: dict[str, Any] = {
             "model": model.litellm_model(),
@@ -44,7 +50,12 @@ class LiteLLMTransport:
             kwargs["api_base"] = model.api_base
         try:
             raw = self._call(kwargs)
-            chunks = read_until_idle(_iter_response(raw), self.idle_timeout)
+            tap = _tap(on_text, on_begin, stream_mode, stream_fields)
+            chunks = read_until_idle(
+                _iter_response(raw),
+                self.idle_timeout,
+                on_chunk=None if tap is None else tap.feed,
+            )
             return aggregate_chunks(chunks, on_delta=self.on_delta)
         except ProviderError:
             raise
@@ -57,6 +68,14 @@ class LiteLLMTransport:
         import litellm
 
         return litellm.completion(**kwargs)
+
+
+def _tap(on_text, on_begin, stream_mode: str, stream_fields=None):
+    if on_text is None:
+        return None
+    if stream_mode == "prose":
+        return ProseTap(on_text, on_begin)
+    return ArticleTap(on_text, on_begin, fields=stream_fields)
 
 
 def _iter_response(raw: Any) -> Iterator[Any]:

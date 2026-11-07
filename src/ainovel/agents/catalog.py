@@ -1,4 +1,4 @@
-"""三个代理的工具表。多出来的名字不会被放进对应代理。"""
+"""四个代理的工具表。多出来的名字不会被放进对应代理。"""
 
 from ainovel.llm.types import ToolSpec
 
@@ -27,6 +27,10 @@ EDITOR_TOOLS = (
     "save_arc_summary",
     "save_volume_summary",
 )
+CHARACTER_TOOLS = (
+    "novel_context",
+    "save_characters",
+)
 
 ARCHITECT_STOP = (
     "save_book",
@@ -38,6 +42,7 @@ ARCHITECT_STOP = (
 )
 WRITER_STOP = ("commit_chapter",)
 EDITOR_STOP = ("save_review", "save_arc_summary", "save_volume_summary")
+CHARACTER_STOP = ("save_characters",)
 
 ARCHITECT_STEPS = (
     "book",
@@ -54,6 +59,7 @@ ARCHITECT_STEPS = (
     "resolve_outline_feedback",
 )
 WRITER_STEPS = ("commit",)
+CHARACTER_STEPS = ("characters",)
 
 _SPECS: dict[str, ToolSpec] = {
     "novel_context": ToolSpec(
@@ -87,6 +93,15 @@ _SPECS: dict[str, ToolSpec] = {
                 "reason": {"type": "string"},
             },
             "required": ["type"],
+        },
+    ),
+    "save_characters": ToolSpec(
+        name="save_characters",
+        description="只保存人物档案。每个人物必须有 name。",
+        parameters={
+            "type": "object",
+            "properties": {"characters": {"type": "array"}},
+            "required": ["characters"],
         },
     ),
     "audit_foundation": ToolSpec(

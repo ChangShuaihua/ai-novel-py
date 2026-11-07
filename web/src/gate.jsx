@@ -71,40 +71,27 @@ export function Login({ status, onEnter }) {
     }
   }
 
+  const title = registering ? "欢迎注册" : "欢迎回来"
+  const action = busy ? "请稍候" : registering ? "注册" : "进入"
+
   return (
     <div className="door">
-      <header className="door-bar">
-        <span className="door-seal" aria-hidden="true">文</span>
-        <span className="door-brand">ainovel</span>
-        <span className="door-here">进门</span>
-      </header>
       {status === "loading" ? (
         <p className="door-wait" role="status">正在确认登录</p>
       ) : (
         <div className="door-stage">
-          <div className="door-hero">
-            <h1>
-              进门
-              <span className="door-mark" aria-hidden="true">文</span>
-            </h1>
-            <p>
-              <span>每一个故事的开始</span>
-              <span>都从这里启程</span>
-            </p>
-          </div>
           <form className="door-card" onSubmit={submit}>
-            <i className="door-corner tl" aria-hidden="true" />
-            <i className="door-corner tr" aria-hidden="true" />
-            <i className="door-corner bl" aria-hidden="true" />
-            <i className="door-corner br" aria-hidden="true" />
-            <Landscape />
-            <div className="door-welcome">
-              <span />
-              <h2>{registering ? "欢迎登记" : "欢迎回来"}</h2>
-              <span />
+            <div className="door-crest">
+              <Landscape />
+              <h1 className="door-title">
+                {title}
+                <span className="door-stamp" aria-hidden="true"><b>雅</b><b>藏</b></span>
+              </h1>
             </div>
             <p className="door-sub">
-              {registering ? "登记后开始书写属于你的故事" : "登录后继续书写属于你的精彩故事"}
+              <i />
+              {registering ? "注册后开始书写属于你的故事" : "登录后继续书写属于你的精彩故事"}
+              <i />
             </p>
             {status === "down" ? <p className="door-error" role="status">控制室没有应答。</p> : null}
             <label className="door-field">
@@ -151,9 +138,6 @@ export function Login({ status, onEnter }) {
               </label>
             ) : null}
             {error ? <p className="door-error" role="status">{error}</p> : null}
-            <button className="door-submit" type="submit" disabled={busy}>
-              {busy ? "请稍候" : registering ? "登记 →" : "进入 →"}
-            </button>
             <div className="door-foot">
               {registering ? <span /> : (
                 <label className="door-check">
@@ -164,9 +148,25 @@ export function Login({ status, onEnter }) {
               {registering ? (
                 <button type="button" className="door-switch" onClick={() => switchMode("login")}>已有账号，去登录 →</button>
               ) : (
-                <button type="button" className="door-switch" onClick={() => switchMode("register")}>没有账号，去登记 →</button>
+                <button type="button" className="door-switch" onClick={() => switchMode("register")}>没有账号，去注册 →</button>
               )}
             </div>
+            <button className="door-submit" type="submit" disabled={busy}>
+              <span className="door-cloud left" aria-hidden="true"><AuspiciousCloud /></span>
+              <span className="door-cloud right" aria-hidden="true"><AuspiciousCloud /></span>
+              <span className="door-go">
+                {action}
+                {busy ? null : <i aria-hidden="true">→</i>}
+              </span>
+            </button>
+            <p className="door-motto">
+              <BookIcon />
+              畅游二次元，开启你的创作之旅
+            </p>
+            <Corner className="tl" />
+            <Corner className="tr" />
+            <Corner className="bl" />
+            <Corner className="br" />
           </form>
         </div>
       )}
@@ -176,12 +176,41 @@ export function Login({ status, onEnter }) {
 
 function Landscape() {
   return (
-    <svg className="door-landscape" viewBox="0 0 280 78" aria-hidden="true">
-      <path d="M18 58c28-22 46-22 68-8 16 10 28 8 42-6 18-18 36-20 58-6 16 10 30 8 48-4 12-8 22-8 34 2" fill="none" stroke="currentColor" strokeWidth="1.2" />
-      <path d="M40 58c18-16 34-16 50-4 12 8 22 6 34-8 14-16 30-18 48-4" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.7" />
-      <circle cx="196" cy="24" r="7" fill="none" stroke="currentColor" strokeWidth="1" />
-      <path d="M24 64h232" stroke="currentColor" strokeWidth="0.8" opacity="0.45" />
-      <path d="M78 66c16 4 28 4 44 0M150 67c18 5 34 4 52-1" fill="none" stroke="currentColor" strokeWidth="0.8" opacity="0.4" />
+    <svg className="door-landscape" viewBox="0 0 460 168" aria-hidden="true">
+      <path d="M108 64C156 18 312 14 368 62" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" opacity="0.55" />
+      <path d="M24 132c38-34 74-40 108-14 24-28 58-40 96-12 32-26 74-18 112 14 20-12 40-8 58 6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M70 140c28-22 52-22 76-6 16 12 30 8 44-10 18-20 40-22 64-6 16 10 32 8 50-4" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity="0.65" />
+      <path d="M330 48c7-4 12-4 18 1M354 40c6-4 11-3 16 1M374 52c5-3 9-3 13 1" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function Corner({ className }) {
+  return (
+    <svg className={`door-corner ${className}`} viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M18 46V28c0-6 5-10 11-10h17" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M26 46V33c0-4 3-7 7-7h13" fill="none" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
+      <circle cx="16" cy="18" r="6.2" fill="rgba(248,244,236,0.96)" stroke="currentColor" strokeWidth="1.15" />
+      <circle cx="25" cy="14" r="4.4" fill="rgba(248,244,236,0.96)" stroke="currentColor" strokeWidth="1.05" />
+      <circle cx="14" cy="27" r="4.2" fill="rgba(248,244,236,0.96)" stroke="currentColor" strokeWidth="1.05" />
+    </svg>
+  )
+}
+
+function AuspiciousCloud() {
+  return (
+    <svg viewBox="0 0 156 64" aria-hidden="true">
+      <path d="M16 38c8-14 22-14 28-2 6-14 24-14 30 0 8-12 24-8 26 4 10-8 22 2 16 10" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+      <path d="M28 42c10 7 22 5 32-2 8 6 18 4 26-1" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function BookIcon() {
+  return (
+    <svg className="door-book" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 6.4C10.3 5.3 8.4 4.8 6.2 4.8H4.2v13.1h2.2c1.9 0 3.5.4 5.6 1.6 2.1-1.2 3.7-1.6 5.6-1.6h2.2V4.8h-2c-2.2 0-4.1.5-5.8 1.6z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M12 6.4v13.1" fill="none" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   )
 }

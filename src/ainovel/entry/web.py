@@ -132,6 +132,12 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
                     except DeskError as exc:
                         self._send(404, {"error": str(exc)})
                     return
+                if parsed.path == "/api/live":
+                    query = parse_qs(parsed.query)
+                    directory = (query.get("directory") or [""])[0]
+                    channel = (query.get("channel") or [""])[0]
+                    self._live(desk, directory or channel)
+                    return
                 self._send(404, {"error": "没有这个接口"})
                 return
             self._send(404, {"error": "没有这个接口"})
@@ -381,6 +387,28 @@ def _handler(accounts: Accounts, auth: AuthStore, origins: frozenset[str] | None
             if not isinstance(payload, dict):
                 raise DeskError("请求必须是对象")
             return payload
+
+        def _live(self, desk: Desk, key: str) -> None:
+            if not key:
+                self._send(400, {"error": "缺少要看的生成"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            origin = getattr(self, "_cors_origin", "")
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Access-Control-Allow-Credentials", "true")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            try:
+                for event in desk.live.events(key):
+                    line = json.dumps(event, ensure_ascii=False)
+                    self.wfile.write(f"data: {line}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+                return
 
         def _send(self, status: int, payload: dict, cookies: tuple[str, ...] = ()) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

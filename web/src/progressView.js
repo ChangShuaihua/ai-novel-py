@@ -1,5 +1,28 @@
 const PHASES = ["init", "premise", "outline", "writing", "complete"]
 const MARK_LIMIT = 36
+const STAGE_PATH = {
+  premise: "/premise",
+  outline: "/outline",
+  writing: "/desk",
+  complete: "/desk",
+}
+
+export function stagePath(snapshot = {}) {
+  if (snapshot.guide?.stage) return "/desk"
+  const phase = snapshot.phase || ""
+  if (phase === "writing" || phase === "complete") return "/desk"
+  if (phase === "outline") return "/outline"
+  return "/premise"
+}
+
+export function phaseHref(id, snapshot = {}) {
+  if (!STAGE_PATH[id]) return ""
+  const phase = snapshot.phase || ""
+  const reached = Math.max(0, PHASES.indexOf(phase))
+  const index = PHASES.indexOf(id)
+  if (index < 0 || index > reached) return ""
+  return STAGE_PATH[id]
+}
 
 export function progressView(snapshot = {}) {
   const phase = snapshot.phase || ""

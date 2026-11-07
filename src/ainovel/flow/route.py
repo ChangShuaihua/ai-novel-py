@@ -15,7 +15,25 @@ from ainovel.flow.model import (
 
 
 def route(state: RouteState) -> Instruction | None:
-    """按事实返回下一条指令。空表示没有可由查表推出的创作任务。"""
+    """默认选择：合法菜单的第一项。空表示没有可由查表推出的创作任务。"""
+    moves = legal_moves(state)
+    if not moves:
+        return None
+    return moves[0]
+
+
+def legal_moves(state: RouteState) -> list[Instruction]:
+    """当前事实下彼此不阻塞的派单。有前置的缺口只放出第一项。"""
+    primary = _primary(state)
+    if primary is None:
+        return []
+    companion = _unordered_companion(state, primary)
+    if companion is None:
+        return [primary]
+    return [primary, companion]
+
+
+def _primary(state: RouteState) -> Instruction | None:
     progress = state.progress
     if progress is None or progress.phase == Phase.COMPLETE:
         return None
@@ -28,6 +46,13 @@ def route(state: RouteState) -> Instruction | None:
                     agent=_planner(state.planning_tier),
                     task=tasks.audit_foundation(),
                     reason="基础设定缺项未齐，照缺项续派同一规划师",
+                )
+            if state.foundation_missing == ["characters"]:
+                return _issue(
+                    Duty.DESIGN_CHARACTERS,
+                    agent="character",
+                    task=tasks.design_characters(),
+                    reason="只剩人物未落盘，派人物代理",
                 )
             return _issue(
                 Duty.FILL_FOUNDATION,
@@ -129,6 +154,34 @@ def route(state: RouteState) -> Instruction | None:
         agent="writer",
         task=tasks.write_chapter(next_chapter),
         reason="续写下一章",
+        chapter=next_chapter,
+    )
+
+
+def _unordered_companion(state: RouteState, primary: Instruction) -> Instruction | None:
+    """非分层书的全局审阅不挡住下一章。大纲已写完时不把越界写作放进菜单。"""
+    if primary.duty != Duty.GLOBAL_REVIEW:
+        return None
+    refresh = state.aggregate_refresh
+    if (
+        refresh is not None
+        and refresh.kind == AggregateKind.GLOBAL_REVIEW
+        and refresh.end_chapter < state.last_completed
+    ):
+        return None
+    progress = state.progress
+    if progress is None or progress.layered:
+        return None
+    next_chapter = progress.next_chapter()
+    if next_chapter <= 0:
+        return None
+    if progress.total_chapters > 0 and next_chapter > progress.total_chapters:
+        return None
+    return _issue(
+        Duty.WRITE_CHAPTER,
+        agent="writer",
+        task=tasks.write_chapter(next_chapter),
+        reason="全局审阅未完成，仍可先写下一章",
         chapter=next_chapter,
     )
 

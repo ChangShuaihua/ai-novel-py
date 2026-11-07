@@ -263,6 +263,15 @@ def test_save_foundation_types_and_complete_conditions(tmp_path: Path):
     assert meta is not None and meta.planning_tier == "short"
     assert (tmp_path / "characters.md").read_text(encoding="utf-8").startswith("# 角色")
 
+    with pytest.raises(ToolArgsError, match="name"):
+        call_tool(book, "save_characters", {"characters": [{"role": "没名字"}]})
+    saved = call_tool(
+        book,
+        "save_characters",
+        {"characters": [{"name": "林舟", "role": "主角", "personality": "先看门再说话"}]},
+    )
+    assert saved["type"] == "characters"
+
     _write_chapter(book, "林舟推开门。")
     call_tool(
         book,

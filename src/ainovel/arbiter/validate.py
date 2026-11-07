@@ -2,8 +2,9 @@
 
 from ainovel.domain.run_meta import AdvanceHold, AdvanceHoldAfter
 from ainovel.domain.transitions import Phase
+from ainovel.flow.plan import PlanError, normalize_schedule
 
-WORKERS = ("architect_long", "architect_short", "writer", "editor")
+WORKERS = ("architect_long", "architect_short", "writer", "editor", "character")
 
 
 class ArbiterValidationError(ValueError):
@@ -20,6 +21,14 @@ def validate_plan_start(decision: dict) -> None:
         raise ArbiterValidationError("reason 不能为空")
 
 
+def validate_schedule(decision: dict, moves: list[dict]) -> None:
+    """dispatch 视为单任务计划。create_plan 的无依赖任务必须落在当前菜单里。"""
+    try:
+        normalize_schedule(decision, moves)
+    except PlanError as exc:
+        raise ArbiterValidationError(str(exc)) from exc
+
+
 def validate_failure(decision: dict, facts: dict) -> None:
     if not str(decision.get("reason") or "").strip():
         raise ArbiterValidationError("reason 不能为空")
@@ -28,9 +37,22 @@ def validate_failure(decision: dict, facts: dict) -> None:
     if action in ("retry", "abort"):
         if dispatch not in (None, {}):
             raise ArbiterValidationError(f"{action} 不带派单")
+        if decision.get("move_id"):
+            raise ArbiterValidationError(f"{action} 不带 move_id")
         return
     if action != "reroute":
         raise ArbiterValidationError("action 非法，只能是 retry、reroute 或 abort")
+    moves = [item for item in (facts.get("legal_moves") or []) if isinstance(item, dict)]
+    if moves:
+        move_id = str(decision.get("move_id") or "")
+        known = {str(item.get("move_id") or "") for item in moves}
+        if move_id not in known:
+            raise ArbiterValidationError(f"reroute 的 move_id 不在合法菜单里: {move_id}")
+        if not str(decision.get("task") or "").strip():
+            raise ArbiterValidationError("reroute 的 task 不能为空")
+        if dispatch not in (None, {}):
+            raise ArbiterValidationError("reroute 使用 move_id，不带 dispatch")
+        return
     if not isinstance(dispatch, dict):
         raise ArbiterValidationError("reroute 必须附 dispatch")
     _validate_dispatch(dispatch, str(facts.get("phase") or ""))

@@ -1,191 +1,157 @@
 # ainovel-py
 
-全自动长篇小说创作引擎。确定性引擎按书目录里的事实调度规划、写作和审阅；模型只在开放创作和少量语义裁定处被调用。从一句话需求写到完整小说，进程结束后从最近落盘的一步继续。
+AI 长篇小说创作与管理工具。项目提供浏览器写作工作台和命令行入口：从创意与前提开始，生成并维护大纲、人物和世界设定，按章节规划、写作、检查和提交；也可以导入已有文本、逐章审阅、恢复中断的创作流程，并导出 TXT。
 
-阶段 1 到阶段 8 已落地，见 [实现顺序](.cursor/docs/08-roadmap.md)。规格见 [文档](.cursor/docs/01-architecture.md)。
+写作流程以本地书籍文件和检查点为依据，便于恢复和追踪；模型负责创作与有限的语义判断，应用代码负责流程调度、数据校验和持久化。Web 版支持账号、个人书架和模型配置。每个账号的数据存放在应用数据目录中，用户密码以哈希形式保存。
 
-## 安装
+## 快速开始：Docker
 
-需要 Python 3.12 或更高版本。
-
-```bash
-pip install -e ".[llm]"
-```
-
-只跑测试、不接真实模型时：
+需要安装 Docker Desktop（或 Docker Engine）及 Docker Compose v2。克隆仓库后，在项目根目录运行：
 
 ```bash
-pip install -e ".[dev]"
-python -m pytest
+docker compose up -d --build
 ```
 
-终端界面另外安装 `textual`。无界面入口不依赖它。
+打开 <http://127.0.0.1:8080>，注册账号后即可使用。默认 Compose 配置会一并启动 Web 前端、Python API、MySQL 和 Redis。首次构建需要下载镜像和依赖。
 
-## 配置
-
-在用户目录放置 `~/.ainovel/config.json`（Windows 为 `%USERPROFILE%\.ainovel\config.json`）。写作控制室的「接入模型」从列表选择提供方和模型，并写入同一份文件。没有这个文件时，启动、恢复、干预和导入会失败。页面不回显完整密钥；密钥留空表示保持已保存的值。
-
-```json
-{
-  "provider": "openai",
-  "model": "gpt-4.1",
-  "api_key": "",
-  "api_base": "",
-  "style": ""
-}
-```
-
-`provider` 和 `model` 必填。传给 LiteLLM 的模型名是 `provider/model`；`model` 本身已带 `/` 时原样使用。`api_key`、`api_base` 留空则不传入，由 LiteLLM 按该提供方的常规方式取密钥。
-
-`style` 选用内置风格预设：`default`、`fantasy`、`romance`、`suspense`。留空则不附加风格预设。文风正文的覆盖顺序是：本书 `<书目录>/style/`，然后 `~/.ainovel/style/`，再然后包内 `ainovel/assets/`。
-
-规划、写作、审阅和裁定共用这份默认模型。调用超时会在同一提供方上重试。
-
-## 写一本书
+常用命令：
 
 ```bash
-python -m ainovel.entry.headless start books/demo "一个在雨夜醒来的人"
+docker compose ps
+docker compose logs -f api
+docker compose down
 ```
 
-`start` 用于新书。它把进度写成 `init`，并清空检查点，然后由启动裁定选定规划师，再进入规划与写作。同一目录已有进度时，用 `resume` 继续，不要再次 `start`。
+`docker compose down` 会停止并移除容器，但不会删除数据库卷。不要运行 `docker compose down -v`，除非你确实要删除本地数据库数据。账号、书架、模型配置和作品数据保存在 Docker 数据卷中。
 
-一本书同时只能有一个可写进程。占用中会提示 `.ainovel.lock`。结束进程后执行：
+## 本地源码开发
+
+源码开发模式需要 Python 3.12+、Node.js 22+、npm，以及可连接的 MySQL 8。Redis 可选；没有 Redis 时应用会直接读取数据库。先准备数据库并导入初始表结构：
 
 ```bash
-python -m ainovel.entry.headless resume books/demo
+mysql -u root -p -e "CREATE DATABASE ainovel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p ainovel < docs/mysql-schema.sql
 ```
 
-已提交的章节不会重写。停机前没处理完的干预会在恢复时重放。
-
-逐章验收：
+创建 Python 环境并安装项目依赖：
 
 ```bash
-python -m ainovel.entry.headless review books/demo on
-python -m ainovel.entry.headless next books/demo
+python -m venv .venv
 ```
 
-`review on` 之后，没有 `next` 就不会派新章。返工和提交中断后的恢复不消耗这张许可。`review off` 恢复自动推进。
+Windows PowerShell：
 
-导入已有文本。切分、分析和合成都写在 `meta/import/`，发布是唯一写入 `chapters/` 的步骤。不加 `--yes` 时停在切分确认，命令打印 `await_confirmation`。确认后带 `--yes` 再执行同一条命令，继续后续阶段。发布后默认停在边界，用 `resume` 才进入正常写作。
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[llm]"
+```
+
+macOS / Linux：
 
 ```bash
-python -m ainovel.entry.headless import books/demo novel.txt
-python -m ainovel.entry.headless import books/demo novel.txt --yes
+source .venv/bin/activate
+python -m pip install -e ".[llm]"
 ```
 
-## 命令
+复制 `.env.example` 为 `.env`，设置数据库密码及本地服务地址。默认 API 监听 `127.0.0.1:8765`，Vite 前端监听 `127.0.0.1:5173`；如果修改端口或前端来源，也要相应更新 `AINOVEL_CORS_ORIGINS` 和 `web/.env` 中的 `VITE_API_BASE`。不要把包含真实密码或密钥的 `.env` 提交到 Git。
 
-入口是 `python -m ainovel.entry.headless`。`diag`、`export`、`eval` 只读打开书目录，不需要模型配置。
-
-| 命令 | 作用 |
-|---|---|
-| `start DIRECTORY REQUIREMENT` | 新书。重置进度与检查点，写入需求并开始跑 |
-| `resume DIRECTORY` | 从最近落盘的事实继续；重放未完成的干预 |
-| `continue DIRECTORY` | 与 `resume` 相同的续跑 |
-| `steer DIRECTORY TEXT` | 注入修改意见。裁定先落盘，再按决定派发或暂停 |
-| `abort DIRECTORY` | 把本次打开的引擎标为取消 |
-| `review DIRECTORY on\|off` | 切换逐章验收与自动推进 |
-| `next DIRECTORY` | 在逐章验收下放行下一个新章 |
-| `import DIRECTORY SOURCE [--yes]` | 在导入工作区编译外部文本，确认后发布章节 |
-| `export DIRECTORY DEST` | 按 `completed_chapters` 的顺序导出 TXT |
-| `diag DIRECTORY` | 只读检查缺章和规则问题，并输出检查点骨架 |
-| `eval DIRECTORY --right STYLE [--left STYLE]` | 用生产文风组装比较两套风格，打印 `same` 或 `different` |
-| `tui DIRECTORY` | 订阅宿主事件。需要已安装 `textual`，并且存在模型配置 |
-| `web [--host 127.0.0.1] [--port 8765]` | 本机写作控制室。界面在 `web/`，先构建再打开。浏览器要先登记或登录 |
-
-正在运行的写作，结束那个进程后再 `resume`。`abort` 只作用于本次打开的引擎。
-
-## 引擎在做什么
-
-一个串行引擎，一条纯函数路由，四类裁定，三个创作代理。代理循环只负责工具调用、写完即停、检查点护栏和写作者上下文压缩。
-
-1. 启动裁定选择短篇或长篇规划师，并把结果写入 `meta/run.json`。记录还在时，恢复不会重新问模型。
-2. 规划师把书名、前提、大纲、角色和世界规则写在书目录根上。
-3. 写作者按计划、草稿、一致性检查、提交的顺序完成一章。提交用 Saga：中断后从冻结的草稿恢复，不采用新的模型参数。
-4. 审阅者在弧末给出结论、弧摘要，需要时写卷摘要。规划师再展开下一弧。
-5. 路由只读已经装入内存的事实，决定下一步派谁。完本报告用已有字数和结构渲染，不再调用模型。完本后再次运行不会自己续写。
-
-超过 50 章时，上下文改为卷摘要、本卷弧摘要和最近章节摘要。写作者对话超窗时会压缩，并重新放回当前章计划和角色快照。
-
-## 书籍目录
-
-章节文件 `chapters/01.md` 起，第 100 章是 `chapters/100.md`。
-
-```text
-书目录/
-  premise.md
-  outline.json
-  characters.json
-  world_rules.json
-  chapters/01.md
-  drafts/01.plan.json
-  drafts/01.draft.md
-  summaries/01.json
-  reviews/01.json
-  meta/progress.json
-  meta/checkpoints.jsonl
-  meta/run.json
-  meta/pending_commit.json
-```
-
-分层书另有 `layered_outline.json` 和 `meta/compass.json`。完整清单见 [领域模型与书籍目录](.cursor/docs/02-domain-store.md)。
-
-## 文档
-
-1. [架构与铁律](.cursor/docs/01-architecture.md)
-2. [领域模型与书籍目录](.cursor/docs/02-domain-store.md)
-3. [工具契约](.cursor/docs/03-tools.md)
-4. [路由与引擎循环](.cursor/docs/04-flow-engine.md)
-5. [裁定与三个创作代理](.cursor/docs/05-arbiter-workers.md)
-6. [上下文、文风与宿主](.cursor/docs/06-context-host.md)
-7. [后置能力与测试](.cursor/docs/07-later-and-tests.md)
-8. [实现顺序](.cursor/docs/08-roadmap.md)
-9. [界面](.cursor/docs/09-ui.md)
-
-## 写作控制室
-
-界面只读宿主快照，按钮对应已有的启动、继续、干预、暂停、逐章验收、导入确认、导出和诊断。
-
-页面和接口分开跑。接口只回答 `/api`，不托管页面。
+启动 API 和前端（使用两个终端）：
 
 ```bash
 python -m ainovel.entry.headless web
 ```
 
-另开一个终端：
-
 ```bash
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
-接口在 <http://127.0.0.1:8765>，页面在 <http://127.0.0.1:5173>。地址写在根目录 `.env` 和 `web/.env`，样例是 `.env.example`、`web/.env.example`。两边都用 `127.0.0.1`，刷新令牌的 cookie 才能带上。先登记或登录再进自己的书架。账号写在数据库的 `users` 表，密码只存散列。本机若还有 `~/.ainovel/users.json`，第一次连接时导入。登录发出一对 JWT：访问令牌大约 15 分钟，放在内存里，请求带 `Authorization: Bearer`；刷新令牌大约 7 天，放在 HttpOnly cookie 里，也写在登录响应中。访问令牌过期后用刷新令牌换一对新的，旧的刷新令牌立即作废。改密码或离开会使已发出的令牌失效。每个人的书架和模型配置在 `~/.ainovel/accounts/` 下分开。命令行的 `start`、`resume` 仍由本机直接执行，不经过这道登录。
+访问 <http://127.0.0.1:5173>。开发模式下，API 和前端分别运行；若只想运行完整容器化环境，请使用前面的 Docker 快速开始。
 
-`npm run build` 把页面写到 `web/dist`，由前端自己的静态服务托管，不放进 Python 包。
+## 模型配置与写作
 
-## 更新仓库和服务器
+进入 Web 工作台后，在“接入模型”页面填写 LiteLLM 支持的提供方、模型名称和 API 凭据。模型配置按账号隔离。模型服务的可用性和费用取决于你所配置的提供方。
 
-先在本机提交并推到 GitHub 的 `main`。`.env` 已被忽略。`tmp-deploy-ainovel.sh`、`tmp-port-probe.py` 和根目录的 `bg.png` 不要加入提交。
+项目也提供命令行创作入口。先安装 `.[llm]` 并按项目配置要求准备模型配置，然后可以新建作品并在中断后续写：
 
 ```bash
-git add -u
-git commit -m "这次改动的原因"
+python -m ainovel.entry.headless start books/demo "一个在雨夜醒来的人"
+python -m ainovel.entry.headless resume books/demo
+```
+
+`start` 用于新作品；已有进度时用 `resume`，不要再次 `start`。CLI 使用本机用户目录下的配置和作品目录，与 Web 账号书架相互独立。更多命令可运行：
+
+```bash
+python -m ainovel.entry.headless --help
+```
+
+## 更新服务器
+
+当前服务器部署使用 `/opt/ainovel`、GitHub `main` 分支和两份 Compose 配置。先在本地提交并推送要发布的变更：
+
+```bash
+git add <要提交的文件>
+git commit -m "描述本次变更"
 git push origin main
 ```
 
-再到服务器拉取。这台机器直接 `git pull` 会在 HTTP/2 上失败，要指定 HTTP/1.1。分支没有设置上游，要写明 `origin main`。
+然后 SSH 登录服务器，在项目目录拉取并重建：
 
 ```bash
 ssh root@47.97.166.61
 cd /opt/ainovel
 git -c http.version=HTTP/1.1 pull origin main
-```
-
-代码打进镜像，只拉取不会换掉正在跑的页面和接口。拉取后重新构建并启动：
-
-```bash
 docker compose -p ainovel -f docker-compose.yml -f docker-compose.server.yml up -d --build
 ```
 
-只改了 `web/` 时，在命令末尾加 `web`。只改了 Python 时加 `api`。两边都改了就用上面这条。MySQL 和账号数据在 Docker 卷里，这样重建不会清掉。页面在 <http://47.97.166.61:443>。
+只改前端时，可以在最后一条命令末尾指定 `web`；只改 Python 后端时指定 `api`。如果公共 Python 依赖或构建配置有变化，建议重建全部服务。
+
+确认服务状态和日志：
+
+```bash
+docker compose -p ainovel -f docker-compose.yml -f docker-compose.server.yml ps
+docker compose -p ainovel -f docker-compose.yml -f docker-compose.server.yml logs --tail=100 api web
+```
+
+服务器页面地址为 <http://47.97.166.61:443>。部署使用持久化 Docker 卷保存 MySQL 和用户数据；普通 `up -d --build` 会重建镜像和容器，不会清空这些卷。切勿在日常更新时添加 `-v`。`.env` 等本机敏感配置不会随 Git 更新；部署前也不要提交密钥、密码或临时文件。
+
+## 测试
+
+安装开发依赖后运行 Python 测试：
+
+```bash
+python -m pip install -e ".[dev,llm]"
+python -m pytest
+```
+
+运行前端测试和生产构建：
+
+```bash
+cd web
+npm test
+npm run build
+```
+
+## 项目结构
+
+```text
+src/ainovel/       Python 引擎、领域模型、存储、API 与 CLI
+web/               React + Vite 写作工作台
+docs/              数据库初始化脚本及项目文档
+tests/             Python 测试
+docker-compose.yml 本地容器编排
+docker-compose.server.yml 服务器部署覆盖配置
+```
+
+架构与实现说明位于 `.cursor/docs/`：
+
+- [架构与边界](.cursor/docs/01-architecture.md)
+- [领域模型与书籍目录](.cursor/docs/02-domain-store.md)
+- [工具契约](.cursor/docs/03-tools.md)
+- [路由与引擎循环](.cursor/docs/04-flow-engine.md)
+- [裁定与创作代理](.cursor/docs/05-arbiter-workers.md)
+- [上下文、文风与宿主](.cursor/docs/06-context-host.md)
+- [后置能力与测试](.cursor/docs/07-later-and-tests.md)
+- [实现路线图](.cursor/docs/08-roadmap.md)
+- [界面说明](.cursor/docs/09-ui.md)

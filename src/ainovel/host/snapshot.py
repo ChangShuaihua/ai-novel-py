@@ -8,7 +8,7 @@ from ainovel.host.report import render_report
 from ainovel.importers.pipeline import ImportError, next_action
 from ainovel.store.book import Book
 from ainovel.store.paths import chapter_number
-from ainovel.tools.files import read_json
+from ainovel.tools.files import read_json, read_text
 
 EXCERPT_LIMIT = 160
 
@@ -50,6 +50,8 @@ def build_snapshot(
     paused: bool = False,
     pause_reason: str = "",
     events: list[str] | None = None,
+    latest_agent: str = "",
+    latest_duty: str = "",
     latest_task: str = "",
     latest_reason: str = "",
     queued_steer: str = "",
@@ -85,9 +87,7 @@ def build_snapshot(
             report = render_report(view)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             report = ""
-    instruction = None
-    if latest_task or latest_reason:
-        instruction = {"task": latest_task, "reason": latest_reason}
+    instruction = _instruction(directory, latest_agent, latest_duty, latest_task, latest_reason)
     return {
         "directory": str(directory),
         "title": _title(view),
@@ -100,6 +100,8 @@ def build_snapshot(
         "total_word_count": progress.total_word_count if progress is not None else 0,
         "pending_rewrites": list(progress.pending_rewrites) if progress is not None else [],
         "latest_instruction": instruction,
+        "premise": _premise_text(directory),
+        "outline": _outline_entries(directory, bool(progress.layered) if progress is not None else False),
         "running": running,
         "paused": paused,
         "pause_reason": pause_reason,
@@ -174,6 +176,56 @@ def _chapters(root: Path, completed: list[int]) -> list[dict]:
         title, body = _split_heading(text, titles.get(number, ""))
         projected.append({"chapter": number, "title": title, "body": body})
     return projected
+
+
+def _premise_text(root: Path) -> str:
+    text = read_text(root, "premise.md")
+    return text.strip() if text else ""
+
+
+def _outline_entries(root: Path, layered: bool) -> list[dict]:
+    if layered:
+        return _layered_entries(root)
+    raw = read_json(root, "outline.json")
+    if isinstance(raw, list) and raw:
+        return _flat_entries(raw)
+    return _layered_entries(root)
+
+
+def _flat_entries(raw: list) -> list[dict]:
+    entries = []
+    for item in raw:
+        if isinstance(item, str):
+            title, summary = item.strip(), ""
+        elif isinstance(item, dict):
+            title = str(item.get("title") or "").strip()
+            summary = str(item.get("summary") or item.get("goal") or "").strip()
+        else:
+            continue
+        if title or summary:
+            entries.append({"chapter": len(entries) + 1, "title": title, "summary": summary})
+    return entries
+
+
+def _layered_entries(root: Path) -> list[dict]:
+    raw = read_json(root, "layered_outline.json")
+    if not isinstance(raw, list):
+        return []
+    entries = []
+    for volume in raw:
+        if not isinstance(volume, dict):
+            continue
+        for arc in volume.get("arcs") or []:
+            if not isinstance(arc, dict):
+                continue
+            for chapter in arc.get("chapters") or []:
+                if not isinstance(chapter, dict):
+                    continue
+                title = str(chapter.get("title") or "").strip()
+                summary = str(chapter.get("summary") or chapter.get("goal") or "").strip()
+                if title or summary:
+                    entries.append({"chapter": len(entries) + 1, "title": title, "summary": summary})
+    return entries
 
 
 def _outline_titles(root: Path) -> dict[int, str]:
@@ -251,6 +303,33 @@ def _import_titles(path: Path) -> list[str]:
     if not isinstance(chapters, list):
         return []
     return [str(item.get("title") or "").strip() for item in chapters if isinstance(item, dict)]
+
+
+def _instruction(directory: Path, agent: str, duty: str, task: str, reason: str) -> dict | None:
+    if not task and not reason:
+        saved = _inflight(directory)
+        if saved is None:
+            return None
+        agent = agent or str(saved.get("agent") or "")
+        duty = duty or str(saved.get("duty") or "")
+        task = str(saved.get("task") or "")
+        reason = reason or str(saved.get("reason") or "")
+    if not task and not reason:
+        return None
+    return {"agent": agent, "duty": duty, "task": task, "reason": reason}
+
+
+def _inflight(directory: Path) -> dict | None:
+    path = directory / "meta" / "inflight_dispatch.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def _short(exc: BaseException) -> str:

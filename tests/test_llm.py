@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -8,7 +9,8 @@ from ainovel.llm.classify import classify_exception
 from ainovel.llm.errors import ProviderError
 from ainovel.llm.litellm_client import LiteLLMTransport
 from ainovel.llm.policy import RoleClient
-from ainovel.llm.stream import aggregate_chunks, read_until_idle
+from ainovel.entry.live import LiveFeed
+from ainovel.llm.stream import ArticleTap, ContentStrings, ProseTap, aggregate_chunks, read_until_idle
 from ainovel.llm.types import Completion, ModelRef, RoleModel
 
 
@@ -200,3 +202,141 @@ def test_loop_sources_do_not_name_novel_roles_or_tools():
         text = (root / relative).read_text(encoding="utf-8")
         for word in banned:
             assert word not in text, relative
+
+
+def test_chapter_content_streams_as_the_arguments_arrive():
+    reader = ContentStrings(content_only=True)
+    assert reader.feed('{"type":"premise","content":"他要') == "他要"
+    assert reader.feed("回家。\\n灯还亮着。") == "回家。\n灯还亮着。"
+    assert reader.feed('"}') == ""
+    outline = ContentStrings(content_only=True)
+    assert outline.feed('{"type":"outline","content":[{"title":"开端","summary":"推门"}]}') == "开端\n推门"
+
+
+def test_transport_emits_chapter_text_before_the_call_returns():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"name": "draft_chapter", "arguments": '{"chapter":1,"content":"'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "林舟"}}]}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "推开门。"}}]}, "finish_reason": "tool_calls"}]},
+    ]
+    seen: list[str] = []
+
+    def completion(**kwargs):
+        assert kwargs["stream"] is True
+        return iter(chunks)
+
+    begun = []
+    LiteLLMTransport(completion=completion, idle_timeout=None).complete(
+        ModelRef(provider="openai", model="demo"),
+        [],
+        [],
+        on_text=seen.append,
+        on_begin=lambda: begun.append("begin"),
+    )
+    assert begun == ["begin"]
+    assert "".join(seen) == "林舟推开门。"
+
+
+def test_book_synopsis_streams_without_emitting_other_fields():
+    chunks = [
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "save_book", "arguments": '{"title":"山海","synopsis":"雨夜'}}]}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "里醒来的人。"}}]}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '灯都灭了。"}'}}]}}]},
+    ]
+    seen: list[str] = []
+    returned = []
+    returned_when_streamed = []
+
+    def receive(text):
+        seen.append(text)
+        returned_when_streamed.append(bool(returned))
+
+    def completion(**kwargs):
+        def generate():
+            for chunk in chunks:
+                yield chunk
+            returned.append(True)
+        return generate()
+
+    LiteLLMTransport(completion=completion, idle_timeout=None).complete(
+        ModelRef(provider="openai", model="demo"), [], [], on_text=receive,
+    )
+    assert "".join(seen) == "雨夜里醒来的人。灯都灭了。"
+    assert returned_when_streamed and not any(returned_when_streamed)
+    assert returned == [True]
+
+
+def test_prose_streams_plain_text_and_json_strings():
+    seen: list[str] = []
+    tap = ProseTap(seen.append)
+    tap.feed({"choices": [{"delta": {"content": "雨"}}]})
+    tap.feed({"choices": [{"delta": {"content": "夜"}}]})
+    assert seen == ["雨", "夜"]
+    packed: list[str] = []
+    ProseTap(packed.append).feed({"choices": [{"delta": {"content": '{"title":"山海","synopsis":"他要回家"}'}}]})
+    assert packed == ["山海\n他要回家"]
+
+
+def test_live_feed_replays_the_buffer_then_new_pieces():
+    feed = LiveFeed()
+    feed.push("book", "雨")
+    found: list[dict] = []
+
+    def listen() -> None:
+        for event in feed.events("book"):
+            found.append(event)
+            if len(found) >= 2 and not event.get("ping"):
+                return
+
+    thread = threading.Thread(target=listen)
+    thread.start()
+    for _ in range(50):
+        if found:
+            break
+        time.sleep(0.01)
+    feed.push("book", "夜")
+    thread.join(1)
+    assert found[0] == {"reset": True, "text": "雨"}
+    assert {"reset": False, "text": "夜"} in found
+
+
+def test_article_tap_ignores_other_tools():
+    seen: list[str] = []
+    tap = ArticleTap(seen.append, fields={"revise_outline": {"content"}})
+    tap.feed(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {"index": 0, "function": {"name": "plan_chapter", "arguments": '{"goal":"推门"}'}}
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+    assert seen == []
+
+
+def test_revise_outline_content_streams_without_other_arguments():
+    seen: list[str] = []
+    tap = ArticleTap(seen.append, fields={"revise_outline": {"content"}})
+    tap.feed({"choices": [{"delta": {"tool_calls": [{
+        "index": 0,
+        "function": {"name": "revise_outline", "arguments": '{"target_chapter":4,"content":[{"title":"转折","summary":"真相揭开"}]}'},
+    }]}}]})
+    assert "".join(seen) == "转折\n真相揭开"

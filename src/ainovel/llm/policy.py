@@ -31,6 +31,10 @@ class RoleClient:
         self.transport = transport
         self.max_attempts = max_attempts
         self.sleep = sleep if sleep is not None else time.sleep
+        self.on_text = None
+        self.on_begin = None
+        self.stream_mode = "article"
+        self.stream_fields = None
 
     def complete(self, messages: list[dict], tools: list[dict]) -> Completion:
         models = [self.role.primary, *self.role.fallbacks]
@@ -39,7 +43,7 @@ class RoleClient:
         while True:
             model = models[index]
             try:
-                return self.transport.complete(model, messages, tools)
+                return self._complete(model, messages, tools)
             except ProviderError as exc:
                 if exc.kind in _TERMINAL or exc.kind not in _SAME_PROVIDER | _FAILOVER:
                     raise
@@ -54,3 +58,17 @@ class RoleClient:
                 delay = exc.retry_after if exc.retry_after and exc.retry_after > 0 else 0.5 * (2 ** (attempt - 1))
                 attempt += 1
                 self.sleep(delay)
+
+    def _complete(self, model: ModelRef, messages: list[dict], tools: list[dict]) -> Completion:
+        transport = self.transport
+        if getattr(transport, "streams", False) and self.on_text is not None:
+            return transport.complete(
+                model,
+                messages,
+                tools,
+                on_text=self.on_text,
+                on_begin=self.on_begin,
+                stream_mode=self.stream_mode,
+                stream_fields=self.stream_fields,
+            )
+        return transport.complete(model, messages, tools)

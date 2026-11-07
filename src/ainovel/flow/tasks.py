@@ -9,6 +9,14 @@ def fill_foundation(missing: list[str]) -> str:
     )
 
 
+def design_characters() -> str:
+    return (
+        "只补人物。先调用 novel_context 读取已有设定，再调用 save_characters。"
+        "每个人物包含 name、role、personality、desire、fear、arc。"
+        "不要改书名、前提、大纲或世界规则。"
+    )
+
+
 def audit_foundation() -> str:
     return (
         "基础设定已齐全：重新调用 novel_context 读取全部已落盘工件与 "

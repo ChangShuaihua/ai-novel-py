@@ -18,6 +18,9 @@ llm = [
     "mcp>=2.2,<3",
 ]
 
+[project.scripts]
+ainovel-mcp = "ainovel.mcp_server:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

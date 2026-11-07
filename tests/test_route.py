@@ -8,7 +8,7 @@ import pytest
 from ainovel.domain.progress import Progress
 from ainovel.domain.transitions import FlowState, Phase
 from ainovel.flow.model import AggregateKind, AggregateRefresh, ArcBoundary, Duty, RouteState
-from ainovel.flow.route import route
+from ainovel.flow.route import legal_moves, route
 
 NIL = "nil"
 REWRITE = "rewrite"
@@ -99,6 +99,84 @@ def test_layered_arc_end_review_before_summary_and_expansion():
     expanded = route(state)
     assert expanded is not None and expanded.agent == "architect_long"
     assert "expand_next_arc" in expanded.task
+
+
+def test_global_review_stays_optional_beside_the_next_chapter():
+    progress = Progress(
+        phase=Phase.WRITING,
+        flow=FlowState.WRITING,
+        completed_chapters=[1, 2, 3, 4, 5],
+        total_chapters=8,
+    )
+    state = RouteState(progress=progress, last_completed=5)
+    moves = legal_moves(state)
+    assert [item.duty for item in moves] == [Duty.GLOBAL_REVIEW, Duty.WRITE_CHAPTER]
+    assert route(state).duty == Duty.GLOBAL_REVIEW
+    assert moves[1].chapter == 6
+
+    progress.total_chapters = 5
+    blocked = legal_moves(RouteState(progress=progress, last_completed=5))
+    assert [item.duty for item in blocked] == [Duty.GLOBAL_REVIEW]
+
+    on_time = RouteState(
+        progress=Progress(
+            phase=Phase.WRITING,
+            flow=FlowState.WRITING,
+            completed_chapters=[1, 2, 3, 4, 5],
+            total_chapters=8,
+        ),
+        last_completed=5,
+        aggregate_refresh=AggregateRefresh(kind=AggregateKind.GLOBAL_REVIEW, end_chapter=5),
+    )
+    assert [item.duty for item in legal_moves(on_time)] == [Duty.GLOBAL_REVIEW, Duty.WRITE_CHAPTER]
+    late = RouteState(
+        progress=Progress(
+            phase=Phase.WRITING,
+            flow=FlowState.WRITING,
+            completed_chapters=[1, 2, 3, 4, 5, 6],
+            total_chapters=8,
+        ),
+        last_completed=6,
+        aggregate_refresh=AggregateRefresh(kind=AggregateKind.GLOBAL_REVIEW, end_chapter=5),
+    )
+    assert [item.duty for item in legal_moves(late)] == [Duty.GLOBAL_REVIEW]
+
+
+def test_arc_end_menu_exposes_only_the_first_gap():
+    boundary = ArcBoundary(
+        is_arc_end=True,
+        volume=1,
+        arc=3,
+        start_chapter=11,
+        end_chapter=22,
+        next_volume=1,
+        next_arc=4,
+        needs_expansion=True,
+    )
+    progress = Progress(phase=Phase.WRITING, flow=FlowState.WRITING, layered=True, completed_chapters=[22])
+    state = RouteState(progress=progress, last_completed=22, arc_boundary=boundary)
+    assert [item.duty for item in legal_moves(state)] == [Duty.ARC_REVIEW]
+
+
+def test_only_missing_characters_go_to_the_character_agent():
+    state = RouteState(
+        progress=Progress(phase=Phase.OUTLINE),
+        foundation_missing=["characters"],
+        planning_tier="long",
+    )
+    got = route(state)
+    assert got is not None
+    assert got.agent == "character"
+    assert got.duty == Duty.DESIGN_CHARACTERS
+    assert "save_characters" in got.task
+
+    mixed = RouteState(
+        progress=Progress(phase=Phase.OUTLINE),
+        foundation_missing=["characters", "world_rules"],
+        planning_tier="long",
+    )
+    other = route(mixed)
+    assert other is not None and other.agent == "architect_long"
 
 
 def test_global_review_and_outline_exhaustion():
