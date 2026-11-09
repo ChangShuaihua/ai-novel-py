@@ -47,7 +47,6 @@ test("前提、大纲、写作各自进自己的页面", () => {
   assert.equal(stagePath({ phase: "outline" }), "/outline")
   assert.equal(stagePath({ phase: "writing" }), "/desk")
   assert.equal(stagePath({ phase: "complete" }), "/desk")
-  assert.equal(stagePath({ guide: { stage: "title" } }), "/desk")
   assert.equal(phaseHref("outline", { phase: "premise" }), "")
   assert.equal(phaseHref("outline", { phase: "outline" }), "/outline")
   assert.equal(phaseHref("writing", { phase: "writing" }), "/desk")

@@ -11,11 +11,10 @@ from ainovel.entry.catalog import CatalogError
 from ainovel.entry.spine_cache import load_spines, store_spines
 from ainovel.domain.book import BookMetadata
 from ainovel.domain.transitions import Phase
-from ainovel.entry.guide import GuideError, confirm as guide_confirm, load_guide, revise as guide_revise
 from ainovel.entry.live import LiveFeed
 from ainovel.exporting import export_txt
 from ainovel.llm.policy import RoleClient
-from ainovel.llm.types import ModelRef, RoleModel
+from ainovel.llm.types import ModelRef
 from ainovel.host.config import ConfigError, config_dir, describe_model, load_config, store_config
 from ainovel.host.host import Host, HostError
 from ainovel.llm.errors import ProviderError
@@ -79,7 +78,6 @@ class Desk:
         self._listings: dict[str, dict] = {}
         self._drop_host_when_idle = False
         self.live = LiveFeed()
-        self._stream_key = ""
 
     def config_ready(self) -> bool:
         try:
@@ -420,14 +418,6 @@ class Desk:
             return self._listing(root)
         if action == "abort":
             return self._abort(root)
-        if load_guide(root) is not None and action in {"resume", "steer", "next", "review_on", "review_off", "import", "import_confirm"}:
-            snap = self._snapshot(root)
-            snap["error"] = "先确认当前这一步。"
-            return snap
-        if action == "guide_confirm":
-            return self._guide_call(root, lambda: guide_confirm(root, payload, self._model_text))
-        if action == "guide_revise":
-            return self._guide_call(root, lambda: guide_revise(root, payload, self._model_text))
         if action in ("review_on", "review_off"):
             return self._review(root, "review" if action == "review_on" else "auto")
         if action in ("resume", "steer", "next", "import", "import_confirm"):
@@ -828,9 +818,6 @@ class Desk:
             return self._publish(root, failed)
 
     def _publish(self, root: Path, snap: dict) -> dict:
-        guide = load_guide(root)
-        if guide is not None:
-            snap["guide"] = guide
         if self._bookdb is None:
             return snap
         public = self._bookdb.public_for(root)
@@ -920,31 +907,6 @@ class Desk:
             return False
         return bool(meta is not None and meta.pending_steer)
 
-    def _guide_call(self, root: Path, work) -> dict:
-        with self._guard:
-            if self._running:
-                snap = self._snapshot_unlocked(root)
-                snap["error"] = "引擎还在跑。"
-                return snap
-            self._running = True
-            self._active = root
-            self._error = ""
-            self._stream_key = str(root)
-        try:
-            work()
-        except GuideError as exc:
-            with self._guard:
-                self._error = str(exc)
-        except Exception as exc:
-            logger.exception("确认流程失败")
-            with self._guard:
-                self._error = _short(exc)
-        finally:
-            with self._guard:
-                self._running = False
-            self._note_book(root)
-        return self._snapshot(root)
-
     def _note_book(self, root: Path) -> None:
         if self._bookdb is None:
             return
@@ -964,36 +926,6 @@ class Desk:
         completer.stream_fields = {"revise_outline": {"content"}}
         completer.on_begin = lambda: self.live.reset(key)
         completer.on_text = lambda text: self.live.push(key, text)
-
-    def _model_text(self, messages: list[dict]) -> str:
-        client = self._completer()
-        key = self._stream_key
-        if key and hasattr(client, "on_text"):
-            client.stream_mode = "prose"
-            client.on_begin = lambda: self.live.reset(key)
-            client.on_text = lambda text: self.live.push(key, text)
-        try:
-            result = client.complete(messages, [])
-        except TypeError:
-            try:
-                config = load_config(self._config_file())
-            except ConfigError as exc:
-                raise GuideError(str(exc)) from exc
-            result = RoleClient(
-                RoleModel(
-                    primary=ModelRef(
-                        provider=config.provider,
-                        model=config.model,
-                        api_key=config.api_key,
-                        api_base=config.api_base,
-                    )
-                ),
-                client,
-            ).complete(messages, [])
-        text = str(getattr(result, "content", "") or "").strip()
-        if not text:
-            raise GuideError("模型没有返回内容")
-        return text
 
     def _completer(self):
         if self._completer_factory is not None:

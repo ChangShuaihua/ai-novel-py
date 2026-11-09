@@ -125,6 +125,37 @@ def test_commit_batched_with_check_waits_until_the_next_turn(tmp_path: Path):
     assert (tmp_path / "chapters" / "01.md").read_text(encoding="utf-8") == "林舟推开门。"
 
 
+def test_successful_stop_tool_skips_later_calls_in_the_same_batch():
+    steps = _Steps()
+    completion = Completion(
+        tool_calls=[
+            ToolCall(id="premise", name="save", arguments="{}"),
+            ToolCall(id="outline", name="save_later", arguments="{}"),
+        ]
+    )
+    script = _Script([completion])
+    called = []
+
+    def call(name: str, args: dict) -> dict:
+        called.append(name)
+        steps.add("premise")
+        return {"saved": True}
+
+    result = run_agent(
+        script,
+        system_prompt="短提示",
+        task="只生成前提",
+        tool_specs=_specs("save", "save_later"),
+        call_tool=call,
+        checkpoints=steps,
+        stop_after=("save", "save_later"),
+        required_steps=("premise",),
+    )
+
+    assert result.stop_tool == "save"
+    assert called == ["save"]
+
+
 def test_ending_without_checkpoint_is_refused(tmp_path: Path):
     book = _book(tmp_path)
     script = _Script([Completion(content="我写完了")] * 3)

@@ -8,7 +8,6 @@ const STAGE_PATH = {
 }
 
 export function stagePath(snapshot = {}) {
-  if (snapshot.guide?.stage) return "/desk"
   const phase = snapshot.phase || ""
   if (phase === "writing" || phase === "complete") return "/desk"
   if (phase === "outline") return "/outline"

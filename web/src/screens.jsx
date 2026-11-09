@@ -14,7 +14,7 @@ import {
   providerOptions,
 } from "./providers.js"
 import { assistView } from "./assist.js"
-import { formatOutline, parseOutline, reorder } from "./beats.js"
+import { reorder } from "./beats.js"
 import { bookTitle, exportFileName, flowLabel, folderName, holdLabel, phaseLabel, shortPath } from "./labels.js"
 import { markLabel, phaseHref, progressCaption, progressView, stagePath } from "./progressView.js"
 
@@ -1448,10 +1448,10 @@ export function DeskScreen({ directory, onLeave }) {
   const { snapshot, loadError, setSnapshot } = useSnapshot(directory)
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
-  const live = useLiveText(directory, Boolean(snapshot?.running && (snapshot.phase === "writing" || snapshot.phase === "complete" || snapshot.guide)))
+  const live = useLiveText(directory, Boolean(snapshot?.running && (snapshot.phase === "writing" || snapshot.phase === "complete")))
 
   useEffect(() => {
-    if (!directory || !snapshot || snapshot.guide?.stage) return
+    if (!directory || !snapshot) return
     const next = stagePath(snapshot)
     if (next !== "/desk") window.location.hash = bookHref(next, directory)
   }, [directory, snapshot])
@@ -1485,8 +1485,6 @@ export function DeskScreen({ directory, onLeave }) {
     }
   }
 
-  const guiding = Boolean(snapshot.guide && view.id === "guide")
-
   return (
     <div className="room desk-room">
     <header className="appbar">
@@ -1507,32 +1505,26 @@ export function DeskScreen({ directory, onLeave }) {
         snapshot={snapshot}
         current="/desk"
         lede={view.sentence}
-        focus={guiding && snapshot.guide.stage === "chapter" ? snapshot.guide.chapter : 0}
         extra={(
           <>
             {snapshot.running ? (
               <span className="pill live"><i aria-hidden="true" />{phase || "正在写"}</span>
             ) : null}
-            {view.id === "guide" ? null : (
-              <div className="mode" role="group" aria-label="推进方式">
-                <button type="button" aria-pressed={snapshot.advance_mode === "auto"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "auto" && act("review_off")}>自动推进</button>
-                <button type="button" aria-pressed={snapshot.advance_mode === "review"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "review" && act("review_on")}>逐章验收</button>
-              </div>
-            )}
+            <div className="mode" role="group" aria-label="推进方式">
+              <button type="button" aria-pressed={snapshot.advance_mode === "auto"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "auto" && act("review_off")}>自动推进</button>
+              <button type="button" aria-pressed={snapshot.advance_mode === "review"} disabled={snapshot.locked || busy} onClick={() => snapshot.advance_mode !== "review" && act("review_on")}>逐章验收</button>
+            </div>
             {snapshot.running && !blocks(view, "abort") ? (
               <button type="button" className="quiet" onClick={() => act("abort")}>暂停</button>
             ) : null}
           </>
         )}
       />
-      {!guiding && snapshot.error && view.id !== "config" ? <p className="banner" role="status">{snapshot.error}</p> : null}
-      {!guiding && loadError ? <p className="banner" role="status">{loadError}</p> : null}
+      {snapshot.error && view.id !== "config" ? <p className="banner" role="status">{snapshot.error}</p> : null}
+      {loadError ? <p className="banner" role="status">{loadError}</p> : null}
       <div className="desk-grid">
         <section>
-          {guiding ? (
-            <GuideStep guide={snapshot.guide} busy={busy || snapshot.running} error={snapshot.error || loadError} live={live} onAct={act} />
-          ) : (
-            <>
+          <>
           <article className="sheet">
             {live ? <h2 className="chapter-name">正在写</h2> : latestChapter?.title ? <h2 className="chapter-name">{latestChapter.title}</h2> : null}
             {view.id === "config" ? <p className="sheet-next"><a className="signal" href="#/model">接入模型</a></p> : null}
@@ -1575,8 +1567,7 @@ export function DeskScreen({ directory, onLeave }) {
               {view.id === "empty" ? <a className="signal link-button" href={bookHref("/new", directory)}>去写需求</a> : null}
             </div>
           </form>
-            </>
-          )}
+          </>
         </section>
         <Assistant snapshot={snapshot} />
       </div>
@@ -1834,17 +1825,6 @@ function beatsFrom(outline) {
   }))
 }
 
-function stampOutline(text) {
-  const items = parseOutline(text)
-  if (!items.length) items.push({ title: "", summary: "" })
-  return items.map((item, index) => ({
-    id: `o${beatSerial += 1}`,
-    title: item.title,
-    summary: item.summary,
-    open: index === 0,
-  }))
-}
-
 function BeatList({ items, disabled, onChange, addLabel, placeholder }) {
   const [over, setOver] = useState(-1)
 
@@ -1947,15 +1927,13 @@ function BeatList({ items, disabled, onChange, addLabel, placeholder }) {
 }
 
 function Assistant({ snapshot }) {
-  const guide = snapshot.guide
   const latest = (snapshot.chapters || []).at(-1)
-  const writing = guide && (guide.stage === "chapter" || guide.stage === "done")
   const view = assistView({
-    outline: snapshot.guide?.outline?.length ? snapshot.guide.outline : (snapshot.outline || []),
-    chapter: writing ? guide.chapter : 0,
-    body: (writing ? guide.chapter_body : "") || latest?.body || "",
-    synopsis: guide?.synopsis || "",
-    stage: guide?.stage || "",
+    outline: snapshot.outline || [],
+    chapter: snapshot.current_chapter || 0,
+    body: latest?.body || "",
+    synopsis: "",
+    stage: snapshot.phase || "",
     completed: snapshot.completed_chapters || [],
     instruction: snapshot.latest_instruction?.task || "",
   })
@@ -2055,106 +2033,6 @@ function Assistant({ snapshot }) {
   )
 }
 
-function GuideStep({ guide, busy, error, live = "", onAct }) {
-  const [title, setTitle] = useState(guide.title || "")
-  const [synopsis, setSynopsis] = useState(guide.synopsis || "")
-  const [outline, setOutline] = useState(guide.outline_text || "")
-  const [outlineBeats, setOutlineBeats] = useState(() => stampOutline(guide.outline_text))
-  const [chapterTitle, setChapterTitle] = useState(guide.chapter_title || "")
-  const [chapterBody, setChapterBody] = useState(guide.chapter_body || "")
-  const [note, setNote] = useState("")
-
-  useEffect(() => {
-    setTitle(guide.title || "")
-    setSynopsis(guide.synopsis || "")
-    setOutline(guide.outline_text || "")
-    setOutlineBeats(stampOutline(guide.outline_text))
-    setChapterTitle(guide.chapter_title || "")
-    setChapterBody(guide.chapter_body || "")
-    setNote("")
-  }, [guide.revision])
-
-  const stage = guide.stage
-  const heading = stage === "title" ? "新书" : stage === "outline" ? "大纲" : stage === "done" ? "最后一章" : `第 ${guide.chapter} 章`
-  const seal = stage === "title" ? "题目" : stage === "outline" ? "大纲" : stage === "done" ? "完" : "本章"
-  let label = "确认并生成大纲"
-  if (stage === "title" && !guide.title) label = "生成题目"
-  if (stage === "outline") label = "确认并写第一章"
-  if (stage === "chapter") label = guide.remaining > 0 ? "确认并写下一章" : "确认这一章"
-  if (stage === "done") label = ""
-
-  function confirm(event) {
-    event.preventDefault()
-    if (stage === "title") onAct("guide_confirm", { title: title.trim(), synopsis: synopsis.trim() })
-    if (stage === "outline") onAct("guide_confirm", { outline_text: outline })
-    if (stage === "chapter") onAct("guide_confirm", { chapter_title: chapterTitle.trim(), chapter_body: chapterBody })
-  }
-
-  function revise() {
-    onAct("guide_revise", { text: note.trim(), chapter_title: chapterTitle.trim(), chapter_body: chapterBody })
-  }
-
-  function changeOutline(next) {
-    setOutlineBeats(next)
-    setOutline(formatOutline(next))
-  }
-
-  return (
-    <form className={stage === "outline" ? "manuscript in-desk is-outline" : "manuscript in-desk"} onSubmit={confirm}>
-      <div className="guide-title">
-        <h2>{heading}<i>{seal}</i></h2>
-      </div>
-      {live ? <p className="live-draft" aria-live="off">{live}<span className="caret" /></p> : null}
-      {stage === "title" ? (
-        <>
-          <Field label="小说标题" count={`${title.length}/24`}>
-            <input value={title} maxLength={24} placeholder="请输入作品标题，24字以内" disabled={busy} onChange={(event) => setTitle(event.target.value)} />
-          </Field>
-          <Field label="小说简介" count={`${synopsis.length}/1000`}>
-            <textarea value={synopsis} maxLength={1000} rows={4} placeholder="请输入作品简介，支持 Markdown" disabled={busy} onChange={(event) => setSynopsis(event.target.value)} />
-          </Field>
-        </>
-      ) : null}
-      {stage === "outline" ? (
-        <div className="manuscript-field">
-          <div className="field-label"><span>大纲</span></div>
-          <BeatList
-            items={outlineBeats}
-            disabled={busy}
-            onChange={changeOutline}
-            addLabel="加一章"
-            placeholder="这一章发生的事"
-          />
-        </div>
-      ) : null}
-      {stage === "chapter" || stage === "done" ? (
-        <>
-          <Field label="章节标题">
-            <input value={chapterTitle} disabled={busy} onChange={(event) => setChapterTitle(event.target.value)} />
-          </Field>
-          <Field label="章节内容">
-            <textarea className="chapter-body" value={chapterBody} rows={16} placeholder="开始写作吧..." disabled={busy || stage === "done"} onChange={(event) => setChapterBody(event.target.value)} />
-          </Field>
-          <Field
-            label="交给 AI 的修改要求"
-            extra={<button type="button" className="field-ai" disabled={busy || !note.trim()} onClick={revise}>{busy ? "生成中" : "AI 修改"}</button>}
-          >
-            <textarea value={note} rows={3} placeholder="把雨夜改成清晨" disabled={busy} onChange={(event) => setNote(event.target.value)} />
-          </Field>
-        </>
-      ) : null}
-      {error ? <p className="banner" role="status">{error}</p> : null}
-      <div className="manuscript-foot">
-        <span />
-        {label ? (
-          <button className="manuscript-create" type="submit" disabled={busy || (stage === "title" && guide.title && (!title.trim() || !synopsis.trim())) || (stage === "outline" && !outline.trim())}>
-            <QuillIcon /> {busy ? "生成中" : label}
-          </button>
-        ) : null}
-      </div>
-    </form>
-  )
-}
 
 export function Library({ onLeave }) {
   const [books, setBooks] = useState(null)
@@ -2183,7 +2061,6 @@ export function Library({ onLeave }) {
               {shown.map((book) => (
                 <li key={book.directory}>
                   <a href={bookHref("/library/read", book.directory)}>
-                    <span className="library-cover"><LibraryIcon /></span>
                     <strong>{book.title || "未命名作品"}</strong>
                     <span>作者 · {book.author}</span>
                     <p>{book.synopsis || "作者还没有写简介。"}</p>
@@ -2257,9 +2134,7 @@ export function Reader({ directory }) {
   const chapters = new Map(chapterRows.map((chapter) => [chapter.chapter, chapter]))
   const selected = current == null ? null : chapters.get(current)
   const done = new Set(snapshot.completed_chapters)
-  const outline = Array.isArray(snapshot.outline) && snapshot.outline.length
-    ? snapshot.outline
-    : (Array.isArray(snapshot.guide?.outline) ? snapshot.guide.outline : [])
+  const outline = Array.isArray(snapshot.outline) ? snapshot.outline : []
   const catalog = outline.length
     ? outline.map((item) => ({
       n: Number(item.chapter),

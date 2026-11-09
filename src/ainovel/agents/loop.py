@@ -151,6 +151,7 @@ def _run_tools(
         )
         if ok and call.name in stop_after:
             stop_tool = call.name
+            break
     return stop_tool
 
 

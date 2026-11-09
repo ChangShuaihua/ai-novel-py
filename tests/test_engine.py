@@ -152,7 +152,7 @@ class Script:
         return "commit_chapter", {"chapter": 1, "summary": "林舟推开门。"}
 
 
-def test_one_sentence_reaches_next_arc(tmp_path: Path):
+def test_one_sentence_stops_at_the_first_planning_approval(tmp_path: Path):
     root = tmp_path / "book"
     script = Script(root)
     host = Host.open(root, completer=script, require_config=False, include_home=False)
@@ -161,14 +161,13 @@ def test_one_sentence_reaches_next_arc(tmp_path: Path):
     finally:
         host.close()
     assert script.plan_start_before_worker
-    assert result.status == "idle"
-    assert (root / "chapters" / "01.md").read_text(encoding="utf-8") == "林舟推开门。"
-    review = json.loads((root / "reviews" / "01.json").read_text(encoding="utf-8"))
-    assert review["scope"] == "arc"
-    assert (root / "summaries" / "arc-v01a01.json").is_file()
-    layered = json.loads((root / "layered_outline.json").read_text(encoding="utf-8"))
-    assert layered[0]["arcs"][1]["chapters"]
-    assert not (root / "chapters" / "02.md").exists()
+    assert result.status == "paused"
+    assert "waiting for your approval" in result.reason
+    run = json.loads((root / "meta" / "run.json").read_text(encoding="utf-8"))
+    assert run["planning_approval"] == "premise"
+    assert (root / "meta" / "book.json").is_file()
+    assert (root / "premise.md").is_file()
+    assert not (root / "outline.json").exists()
 
 
 def test_plan_start_is_reused_until_both_records_are_removed(tmp_path: Path):
