@@ -157,6 +157,7 @@ export function Shelf({ onLeave }) {
   const [searching, setSearching] = useState(wantsSearch)
   const [stars, setStars] = useState(readStars)
   const [menuDir, setMenuDir] = useState(null)
+  const [confirmation, setConfirmation] = useState(null)
 
   useEffect(() => {
     const sync = () => {
@@ -239,6 +240,27 @@ export function Shelf({ onLeave }) {
     } catch (reason) {
       setActionError(reason.message)
     }
+  }
+
+  function askConfirmation(book, action) {
+    setMenuDir(null)
+    setConfirmation({ book, action })
+  }
+
+  async function confirmBookAction() {
+    if (!confirmation) return
+    const { book, action } = confirmation
+    setConfirmation(null)
+    if (action === "star") {
+      toggleStar(book.directory)
+      return
+    }
+    if (action === "publish") {
+      setActionError("")
+      try { setLibrary(await publishBook(book.directory, !book.is_public)) } catch (reason) { setActionError(reason.message) }
+      return
+    }
+    await discardBook(book.directory)
   }
   const emptyCopy = books.length === 0
     ? ["暂无书籍", "去创作一本属于你的故事吧"]
@@ -338,25 +360,18 @@ export function Shelf({ onLeave }) {
                             <button
                               type="button"
                               role="menuitem"
-                              onClick={() => {
-                                toggleStar(book.directory)
-                                setMenuDir(null)
-                              }}
+                              onClick={() => askConfirmation(book, "star")}
                             >{starred ? "取消收藏" : "收藏"}</button>
                             <button
                               type="button"
                               role="menuitem"
-                              onClick={async () => {
-                                setActionError("")
-                                try { setLibrary(await publishBook(book.directory, !book.is_public)) } catch (reason) { setActionError(reason.message) }
-                                setMenuDir(null)
-                              }}
+                              onClick={() => askConfirmation(book, "publish")}
                             >{book.is_public ? "从图书馆下架" : "公开到图书馆"}</button>
                             <button
                               type="button"
                               role="menuitem"
                               className="danger"
-                              onClick={() => discardBook(book.directory)}
+                              onClick={() => askConfirmation(book, "discard")}
                             >放进废纸篓</button>
                           </div>
                         ) : null}
@@ -378,6 +393,67 @@ export function Shelf({ onLeave }) {
           </aside>
         </div>
       </div>
+      {confirmation ? (
+        <BookActionConfirm
+          confirmation={confirmation}
+          starred={stars.includes(confirmation.book.directory)}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={confirmBookAction}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function BookActionConfirm({ confirmation, starred, onCancel, onConfirm }) {
+  const cancelRef = useRef(null)
+  const { book, action } = confirmation
+  const title = shelfTitle(book)
+  const copy = action === "star"
+    ? {
+        heading: starred ? "取消收藏？" : "收藏这本书？",
+        detail: starred ? `《${title}》将从收藏中移除。` : `《${title}》将加入收藏。`,
+        confirm: starred ? "取消收藏" : "确认收藏",
+      }
+    : action === "publish"
+      ? {
+          heading: book.is_public ? "从图书馆下架？" : "公开到图书馆？",
+          detail: book.is_public ? `读者将无法继续在图书馆看到《${title}》。` : `所有读者都可以在图书馆阅读《${title}》。`,
+          confirm: book.is_public ? "确认下架" : "确认公开",
+        }
+      : {
+          heading: "放进废纸篓？",
+          detail: `《${title}》将离开书架，三天后自动删除。期间可以恢复。`,
+          confirm: "放进废纸篓",
+        }
+
+  useEffect(() => {
+    cancelRef.current?.focus()
+    function close(event) {
+      if (event.key === "Escape") onCancel()
+    }
+    window.addEventListener("keydown", close)
+    return () => window.removeEventListener("keydown", close)
+  }, [onCancel])
+
+  return (
+    <div className="book-confirm-backdrop" role="presentation" onPointerDown={onCancel}>
+      <section
+        className="book-confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="book-confirm-title"
+        aria-describedby="book-confirm-detail"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <span className="book-confirm-seal" aria-hidden="true">确</span>
+        <h2 id="book-confirm-title">{copy.heading}</h2>
+        <p id="book-confirm-detail">{copy.detail}</p>
+        <div className="book-confirm-actions">
+          <button ref={cancelRef} type="button" className="quiet" onClick={onCancel}>取消</button>
+          <button type="button" className={action === "discard" ? "danger" : "signal"} onClick={onConfirm}>{copy.confirm}</button>
+        </div>
+      </section>
     </div>
   )
 }

@@ -975,6 +975,86 @@ h2 {
 
 .volume:focus-visible { outline-color: #f4eadc; }
 
+.book-confirm-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(25, 17, 12, 0.62);
+  backdrop-filter: blur(3px);
+}
+
+.book-confirm {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  width: min(420px, 100%);
+  padding: 30px 30px 24px;
+  border: 1px solid var(--line-strong);
+  background:
+    linear-gradient(90deg, rgba(122, 58, 52, 0.08), transparent 18%),
+    var(--paper);
+  box-shadow: 0 20px 60px rgba(10, 6, 4, 0.38);
+}
+
+.book-confirm::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  border: 1px solid rgba(99, 69, 46, 0.16);
+  pointer-events: none;
+}
+
+.book-confirm h2,
+.book-confirm p {
+  position: relative;
+  margin: 0;
+}
+
+.book-confirm h2 {
+  padding-right: 48px;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.book-confirm p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.book-confirm-seal {
+  position: absolute;
+  z-index: 1;
+  top: 24px;
+  right: 26px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--cinnabar);
+  color: var(--cinnabar);
+  font-family: var(--serif);
+}
+
+.book-confirm-actions {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.book-confirm-actions button {
+  min-width: 96px;
+}
+
 .bookcase-empty {
   display: block;
   min-height: 240px;
