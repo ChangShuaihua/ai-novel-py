@@ -1936,6 +1936,7 @@ function Assistant({ snapshot }) {
     stage: snapshot.phase || "",
     completed: snapshot.completed_chapters || [],
     instruction: snapshot.latest_instruction?.task || "",
+    layered: Boolean(snapshot.layered || snapshot.planning_tier === "long"),
   })
   const ratio = view.total ? Math.round((view.written / view.total) * 100) : 0
   return (

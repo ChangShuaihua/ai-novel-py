@@ -97,6 +97,8 @@ def build_snapshot(
         "next_chapter": progress.next_chapter() if progress is not None else 0,
         "completed_chapters": completed,
         "total_chapters": progress.total_chapters if progress is not None else 0,
+        "layered": bool(progress.layered) if progress is not None else False,
+        "planning_tier": meta.planning_tier if meta is not None else "",
         "total_word_count": progress.total_word_count if progress is not None else 0,
         "pending_rewrites": list(progress.pending_rewrites) if progress is not None else [],
         "latest_instruction": instruction,

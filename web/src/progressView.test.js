@@ -26,6 +26,18 @@ test("写作中标出下一章，返工盖过已完成", () => {
   assert.equal(markLabel(view.marks[1]), "第 2 章，待返工")
 })
 
+test("长篇显示当前规划章数而不是全书总章数", () => {
+  const view = progressView({
+    phase: "writing",
+    planning_tier: "long",
+    layered: true,
+    total_chapters: 10,
+    completed_chapters: [1, 2],
+    next_chapter: 3,
+  })
+  assert.equal(progressCaption(view, ""), "已完成 2 章 · 当前已规划 10 章")
+})
+
 test("写过大纲的章节要照实说", () => {
   const done = Array.from({ length: 13 }, (_, index) => index + 1)
   const view = progressView({

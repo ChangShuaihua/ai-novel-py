@@ -50,6 +50,7 @@ export function assistView({
   stage = "",
   completed = [],
   instruction = "",
+  layered = false,
 } = {}) {
   const doneNumbers = new Set(completed.map(Number))
   const items = outline.map((item) => {
@@ -62,7 +63,7 @@ export function assistView({
   const people = peopleFrom(source)
   const relations = body.trim() ? relationsFrom(body, people) : []
   const plants = plantsFrom(items, chapter, body, people)
-  const notes = notesFrom({ items, chapter, body, stage, people, instruction })
+  const notes = notesFrom({ items, chapter, body, stage, people, instruction, layered })
   return {
     written,
     total: items.length,
@@ -94,7 +95,7 @@ function plantsFrom(items, chapter, body, people) {
   return plants.slice(0, 4)
 }
 
-function notesFrom({ items, chapter, body, stage, people = [], instruction }) {
+function notesFrom({ items, chapter, body, stage, people = [], instruction, layered }) {
   const notes = []
   if (instruction) notes.push(instruction)
   const plan = items.find((item) => item.n === Number(chapter))
@@ -106,7 +107,7 @@ function notesFrom({ items, chapter, body, stage, people = [], instruction }) {
     else if (expected.length || castInPlan.length) notes.push("这一章的人和大纲对得上。")
     else if (plan.summary) notes.push(`这一章大纲要写的是：${plan.summary.length > 48 ? `${plan.summary.slice(0, 48)}…` : plan.summary}`)
   } else if (stage === "outline" && items.length) {
-    notes.push(`大纲共 ${items.length} 章。确认后从第 1 章写起。`)
+    notes.push(`${layered ? "当前已规划" : "大纲共"} ${items.length} 章。确认后从第 1 章写起。`)
   } else if (stage === "title") {
     notes.push("题目定下来之后再排大纲。")
   } else if (stage === "chapter") {

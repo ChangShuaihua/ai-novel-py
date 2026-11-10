@@ -32,6 +32,7 @@ export function progressView(snapshot = {}) {
   const total = Math.max(0, Number(snapshot.total_chapters) || 0)
   const next = Math.max(0, Number(snapshot.next_chapter) || 0)
   const words = Math.max(0, Number(snapshot.total_word_count) || 0)
+  const layered = Boolean(snapshot.layered || snapshot.planning_tier === "long")
   const written = total > 0 ? [...done].filter((n) => n <= total).length : done.size
   const beyond = total > 0 ? [...done].filter((n) => n > total).sort((a, b) => a - b) : []
   const phases = PHASES.map((id, i) => ({
@@ -48,15 +49,21 @@ export function progressView(snapshot = {}) {
       return { n, state }
     })
     : null
-  return { phases, phase, total, written, beyond, words, marks, ratio: total > 0 ? written / total : 0 }
+  return { phases, phase, total, written, beyond, words, layered, marks, ratio: total > 0 ? written / total : 0 }
 }
 
 export function progressCaption(view, flow) {
   if (!view.phase && view.total === 0 && view.written === 0) return "还没有进度"
   const beyond = view.beyond || []
   const latestBeyond = beyond.length ? beyond[beyond.length - 1] : 0
-  const chapters = latestBeyond && view.written >= view.total
-    ? `大纲 ${view.total} 章已写完 · 又写到第 ${latestBeyond} 章`
+  const chapters = view.layered
+    ? view.total > 0
+      ? `已完成 ${view.written} 章 · 当前已规划 ${view.total} 章`
+      : view.written > 0
+        ? `已完成 ${view.written} 章`
+        : "当前章数还没规划"
+    : latestBeyond && view.written >= view.total
+      ? `大纲 ${view.total} 章已写完 · 又写到第 ${latestBeyond} 章`
     : latestBeyond
       ? `已完成 ${view.written} / 共 ${view.total} 章 · 大纲外写到第 ${latestBeyond} 章`
       : view.total > 0

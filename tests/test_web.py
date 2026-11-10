@@ -49,6 +49,8 @@ def test_snapshot_follows_completed_order_and_truncates_excerpt(tmp_path: Path):
     snap = build_snapshot(root, config_ready=True, config_dir=str(tmp_path))
     assert snap["completed_chapters"] == [2, 1]
     assert snap["total_chapters"] == 4
+    assert snap["layered"] is False
+    assert snap["planning_tier"] == ""
     assert [item["chapter"] for item in snap["chapters"]] == [2]
     assert snap["chapters"][0]["title"] == "上路"
     assert snap["latest_excerpt"] == ""
