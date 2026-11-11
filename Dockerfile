@@ -6,6 +6,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN pip install --index-url "$PIP_INDEX_URL" \
+    "setuptools>=68" \
     "pydantic>=2.6" \
     "pymysql>=1.1" \
     "redis>=5" \
